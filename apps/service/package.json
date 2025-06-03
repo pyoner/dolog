@@ -1,4 +1,10 @@
 {
   "name": "service",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "drizzle-orm": "^0.44.1"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.1"
+  }
 }
