@@ -41,6 +41,6 @@ export class DoLog extends DurableObject<Env> {
   }
 
   async count() {
-    return this.db.select({ count: count() }).from(logs);
+    return (await this.db.select({ count: count() }).from(logs))[0].count;
   }
 }
