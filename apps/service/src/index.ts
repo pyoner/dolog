@@ -9,7 +9,7 @@ export interface Env {
 
 export class DoLog extends DurableObject<Env> {
   storage: DurableObjectStorage;
-  db: DrizzleSqliteDODatabase<any>;
+  db: DrizzleSqliteDODatabase;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
