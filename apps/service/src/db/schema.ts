@@ -1,10 +1,11 @@
 import { int, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 export const keys = sqliteTable('keys', {
-  id: text()
-    .primaryKey()
+  id: int().primaryKey({ autoIncrement: true }),
+  value: text()
+    .unique()
     .$default(() => crypto.randomUUID()),
-  name: text().notNull(),
+  name: text(),
   created_at: int({ mode: 'timestamp_ms' }).$default(() => new Date()),
 });
 
