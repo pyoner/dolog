@@ -1,6 +1,7 @@
 {
   "name": "service",
   "private": true,
+  "type": "module",
   "scripts": {
     "db:generate": "bun drizzle-kit generate"
   },
