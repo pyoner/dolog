@@ -1,55 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "615a01d9-0129-407c-9da0-baf1166e39a8",
+  "id": "b952a26d-4c3d-4c9b-8832-19ec6a9e05bd",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "keys": {
-      "name": "keys",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "value": {
-          "name": "value",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "keys_value_unique": {
-          "name": "keys_value_unique",
-          "columns": [
-            "value"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "logs": {
       "name": "logs",
       "columns": {
@@ -64,15 +18,16 @@
           "name": "message",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "created_at": {
           "name": "created_at",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
         }
       },
       "indexes": {},
