@@ -7,6 +7,7 @@ import { logs } from './db/schema';
 
 export interface Env {
   DO_LOG: DurableObjectNamespace<DoLog>;
+  DO_LOG_PREFIX?: string;
 }
 
 export class DoLog extends DurableObject<Env> {
@@ -42,5 +43,56 @@ export class DoLog extends DurableObject<Env> {
 
   async count() {
     return (await this.db.select({ count: count() }).from(logs))[0].count;
+  }
+}
+
+export class DoLogKV extends DurableObject<Env> {
+  readonly prefix: string;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.prefix = env.DO_LOG_PREFIX ?? 'logs:';
+  }
+
+  async write(message: unknown) {
+    const id = Date.now().toString();
+    await this.ctx.storage.put(`${this.prefix}${id}`, message);
+    return { id };
+  }
+
+  async tail(limit = 100) {
+    const list = await this.ctx.storage.list({
+      prefix: this.prefix,
+      reverse: true,
+      limit,
+    });
+    return Array.from(list.values());
+  }
+
+  async head(limit = 100) {
+    const list = await this.ctx.storage.list({
+      prefix: this.prefix,
+      reverse: false,
+      limit,
+    });
+    return Array.from(list.values());
+  }
+
+  async count() {
+    let cursor: string | undefined = undefined;
+    let total = 0;
+
+    do {
+      const list: Map<string, unknown> = await this.ctx.storage.list({
+        prefix: this.prefix,
+        reverse: false,
+        limit: 1000,
+        startAfter: cursor,
+      });
+      total += list.size;
+      cursor = Array.from(list.keys()).at(-1);
+    } while (cursor);
+
+    return total;
   }
 }
