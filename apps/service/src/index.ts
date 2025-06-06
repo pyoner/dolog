@@ -56,8 +56,7 @@ export class DoLogKV extends DurableObject<Env> {
 
   async write(message: unknown) {
     const id = Date.now().toString();
-    await this.ctx.storage.put(`${this.prefix}${id}`, message);
-    return { id };
+    return this.ctx.storage.put(`${this.prefix}${id}`, message);
   }
 
   async tail(limit = 100) {
