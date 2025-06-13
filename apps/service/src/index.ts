@@ -60,7 +60,7 @@ export class DoLogKV extends DurableObject<Env> {
   }
 
   async tail(limit = 100) {
-    return await this.ctx.storage.list({
+    return this.ctx.storage.list({
       prefix: this.prefix,
       reverse: true,
       limit,
@@ -68,7 +68,7 @@ export class DoLogKV extends DurableObject<Env> {
   }
 
   async head(limit = 100) {
-    return await this.ctx.storage.list({
+    return this.ctx.storage.list({
       prefix: this.prefix,
       reverse: false,
       limit,
