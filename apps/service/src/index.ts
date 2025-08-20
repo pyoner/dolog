@@ -26,7 +26,7 @@ export class DoLog extends DurableObject<Env> {
     });
   }
   private async _migrate() {
-    migrate(this.db, migrations);
+    await migrate(this.db, migrations);
   }
 
   async write(message: unknown) {
