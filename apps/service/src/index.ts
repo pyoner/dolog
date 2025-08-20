@@ -1,7 +1,11 @@
 import { DurableObject } from 'cloudflare:workers';
 import { asc, count, desc } from 'drizzle-orm';
-import { drizzle, DrizzleSqliteDODatabase } from 'drizzle-orm/durable-sqlite';
+import {
+  drizzle,
+  type DrizzleSqliteDODatabase,
+} from 'drizzle-orm/durable-sqlite';
 import { migrate } from 'drizzle-orm/durable-sqlite/migrator';
+
 import migrations from './db/drizzle/migrations';
 import { logs } from './db/schema';
 
@@ -12,7 +16,7 @@ export interface Env {
 
 export class DoLog extends DurableObject<Env> {
   storage: DurableObjectStorage;
-  db: DrizzleSqliteDODatabase<any>;
+  db: DrizzleSqliteDODatabase;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -76,7 +80,7 @@ export class DoLogKV extends DurableObject<Env> {
   }
 
   async count() {
-    let cursor: string | undefined = undefined;
+    let cursor: string | undefined;
     let total = 0;
 
     do {
