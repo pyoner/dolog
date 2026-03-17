@@ -53,19 +53,18 @@ This repo includes a simple example seed file at `seed.sql`.
 Create a local example database:
 
 ```bash
-sqlite3 dev.sqlite < seed.sql
+sqlite3 db.sqlite < seed.sql
 ```
 
 You can then run the CLI against that file:
 
 ```bash
-cargo run -p dolog -- trigger create dev.sqlite --table users
-cargo run -p dolog -- trigger create dev.sqlite --table users
-cargo run -p dolog -- trigger status dev.sqlite
-cargo run -p dolog -- log status dev.sqlite
-cargo run -p dolog -- trigger create dev.sqlite --table users --dry-run
-cargo run -p dolog -- log export dev.sqlite --dry-run
-cargo run -p dolog -- log export dev.sqlite changes.jsonl
+cargo run -p dolog -- trigger create db.sqlite --table users
+cargo run -p dolog -- trigger status db.sqlite
+cargo run -p dolog -- log status db.sqlite
+cargo run -p dolog -- trigger create db.sqlite --table users --dry-run
+cargo run -p dolog -- log export db.sqlite --dry-run
+cargo run -p dolog -- log export db.sqlite changes.jsonl
 ```
 
 ## Commands
@@ -73,103 +72,103 @@ cargo run -p dolog -- log export dev.sqlite changes.jsonl
 Create triggers for a table:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger create db.sqlite --table users
 ```
 
 Create triggers only for specific operations:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --operation insert
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --operation insert --operation update
+cargo run -p dolog -- trigger create db.sqlite --table users --operation insert
+cargo run -p dolog -- trigger create db.sqlite --table users --operation insert --operation update
 ```
 
 Create triggers for multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts
+cargo run -p dolog -- trigger create db.sqlite --table users --table posts
 ```
 
 Create triggers for all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables
+cargo run -p dolog -- trigger create db.sqlite --all-tables
 ```
 
 Update triggers after a schema change:
 
 ```bash
-cargo run -p dolog -- trigger update /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger update db.sqlite --table users
 ```
 
 Update only specific operations after a schema change:
 
 ```bash
-cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --operation insert
+cargo run -p dolog -- trigger update db.sqlite --table users --operation insert
 ```
 
 Delete triggers for a table:
 
 ```bash
-cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger delete db.sqlite --table users
 ```
 
 Delete only specific operations:
 
 ```bash
-cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --operation delete
+cargo run -p dolog -- trigger delete db.sqlite --table users --operation delete
 ```
 
 Preview SQL without modifying the database:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --dry-run
-cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --dry-run
-cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --dry-run
+cargo run -p dolog -- trigger create db.sqlite --table users --dry-run
+cargo run -p dolog -- trigger update db.sqlite --table users --dry-run
+cargo run -p dolog -- trigger delete db.sqlite --table users --dry-run
 ```
 
 Preview multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts --dry-run
+cargo run -p dolog -- trigger create db.sqlite --table users --table posts --dry-run
 ```
 
 Preview all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables --dry-run
+cargo run -p dolog -- trigger create db.sqlite --all-tables --dry-run
 ```
 
 Write SQL to a file instead of applying it:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --output migrations/001_create_users_triggers.sql
-cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --output migrations/002_update_users_triggers.sql
-cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --output migrations/003_delete_users_triggers.sql
+cargo run -p dolog -- trigger create db.sqlite --table users --output 001_create_users_triggers.sql
+cargo run -p dolog -- trigger update db.sqlite --table users --output 002_update_users_triggers.sql
+cargo run -p dolog -- trigger delete db.sqlite --table users --output 003_delete_users_triggers.sql
 ```
 
 Write one combined SQL plan for multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts --output migrations/001_create_triggers.sql
+cargo run -p dolog -- trigger create db.sqlite --table users --table posts --output 001_create_triggers.sql
 ```
 
 Write one combined SQL plan for all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables --output migrations/001_create_triggers.sql
+cargo run -p dolog -- trigger create db.sqlite --all-tables --output 001_create_triggers.sql
 ```
 
 Show trigger status:
 
 ```bash
-cargo run -p dolog -- trigger status /path/to/app.sqlite
-cargo run -p dolog -- trigger status /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger status db.sqlite
+cargo run -p dolog -- trigger status db.sqlite --table users
 ```
 
 Example status output:
 
 ```text
-Trigger status for /path/to/app.sqlite
+Trigger status for db.sqlite
 
 TABLE  INSERT  UPDATE  DELETE
 users  yes     yes     yes
@@ -179,20 +178,20 @@ posts  yes     no      yes
 Export captured logs to JSON Lines:
 
 ```bash
-cargo run -p dolog -- log status /path/to/app.sqlite
-cargo run -p dolog -- log export /path/to/app.sqlite /path/to/changes.jsonl
+cargo run -p dolog -- log status db.sqlite
+cargo run -p dolog -- log export db.sqlite changes.jsonl
 ```
 
 Export only the next batch:
 
 ```bash
-cargo run -p dolog -- log export /path/to/app.sqlite /path/to/changes.jsonl --limit 100
+cargo run -p dolog -- log export db.sqlite changes.jsonl --limit 100
 ```
 
 Dry run without writing or deleting:
 
 ```bash
-cargo run -p dolog -- log export /path/to/app.sqlite --dry-run
+cargo run -p dolog -- log export db.sqlite --dry-run
 ```
 
 ## How It Works
@@ -220,7 +219,7 @@ These triggers write rows into `_dolog_changes` with:
 Example log status output:
 
 ```text
-Pending log rows for /path/to/app.sqlite
+Pending log rows for db.sqlite
 
 TABLE  OPERATION  COUNT
 users  INSERT         1
