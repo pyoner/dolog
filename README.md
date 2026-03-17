@@ -61,6 +61,7 @@ You can then run the CLI against that file:
 ```bash
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users
 cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite
+cargo run -p dolog -- log status /home/pyoner/repo/dolog/dev.sqlite
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
 cargo run -p dolog -- log export /home/pyoner/repo/dolog/dev.sqlite --output /home/pyoner/repo/dolog/changes.jsonl
 ```
@@ -176,6 +177,7 @@ posts  yes     no      yes
 Export captured logs to JSON Lines:
 
 ```bash
+cargo run -p dolog -- log status /path/to/app.sqlite
 cargo run -p dolog -- log export /path/to/app.sqlite --output /path/to/changes.jsonl
 ```
 
@@ -204,6 +206,20 @@ These triggers write rows into `_dolog_changes` with:
 ## Log Export
 
 `dolog log export` reads rows from `_dolog_changes`, appends them to a JSONL file, and then deletes the exported rows from the database.
+
+`dolog log status` shows pending change rows grouped by table and operation before export.
+
+Example log status output:
+
+```text
+Pending log rows for /path/to/app.sqlite
+
+TABLE  OPERATION  COUNT
+users  INSERT         1
+users  UPDATE         1
+
+TOTAL                2
+```
 
 Example JSONL record:
 

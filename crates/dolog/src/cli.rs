@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::log_export::export_logs;
+use crate::log_export::{export_logs, log_status};
 use crate::trigger::{
     AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
@@ -38,6 +38,7 @@ impl LogCommand {
     fn run(self) -> Result<(), AppError> {
         match self.action {
             LogAction::Export(args) => args.run(),
+            LogAction::Status(args) => args.run(),
         }
     }
 }
@@ -45,6 +46,7 @@ impl LogCommand {
 #[derive(Debug, Subcommand)]
 enum LogAction {
     Export(LogExportArgs),
+    Status(LogStatusArgs),
 }
 
 #[derive(Debug, Args)]
@@ -68,6 +70,28 @@ impl LogExportArgs {
             result.exported,
             self.output.display()
         );
+        Ok(())
+    }
+}
+
+#[derive(Debug, Args)]
+struct LogStatusArgs {
+    db: PathBuf,
+    #[arg(long, default_value = "_dolog_changes")]
+    log_table: String,
+}
+
+impl LogStatusArgs {
+    fn run(self) -> Result<(), AppError> {
+        let connection = open_connection(&self.db)?;
+        let rows = log_status(&connection, &self.log_table)?;
+
+        if rows.is_empty() {
+            println!("No pending log rows for {}.", self.db.display());
+            return Ok(());
+        }
+
+        print_log_status_table(&self.db, &rows);
         Ok(())
     }
 }
@@ -311,6 +335,63 @@ fn write_plan(path: &PathBuf, plan: &ExecutionPlan) -> Result<(), AppError> {
         path: path.display().to_string(),
         source,
     })
+}
+
+fn print_log_status_table(db: &PathBuf, rows: &[crate::log_export::LogStatusRow]) {
+    let table_width = rows
+        .iter()
+        .map(|row| row.table_name.len())
+        .max()
+        .unwrap_or(5)
+        .max("TABLE".len());
+    let operation_width = rows
+        .iter()
+        .map(|row| row.operation.len())
+        .max()
+        .unwrap_or(9)
+        .max("OPERATION".len());
+    let count_width = rows
+        .iter()
+        .map(|row| row.count.to_string().len())
+        .max()
+        .unwrap_or(5)
+        .max("COUNT".len());
+    let total = rows.iter().map(|row| row.count).sum::<i64>();
+
+    println!("Pending log rows for {}", db.display());
+    println!();
+    println!(
+        "{:<table_width$}  {:<operation_width$}  {:>count_width$}",
+        "TABLE",
+        "OPERATION",
+        "COUNT",
+        table_width = table_width,
+        operation_width = operation_width,
+        count_width = count_width,
+    );
+
+    for row in rows {
+        println!(
+            "{:<table_width$}  {:<operation_width$}  {:>count_width$}",
+            row.table_name,
+            row.operation,
+            row.count,
+            table_width = table_width,
+            operation_width = operation_width,
+            count_width = count_width,
+        );
+    }
+
+    println!();
+    println!(
+        "{:<table_width$}  {:<operation_width$}  {:>count_width$}",
+        "TOTAL",
+        "",
+        total,
+        table_width = table_width,
+        operation_width = operation_width,
+        count_width = count_width,
+    );
 }
 
 fn collect_plan(

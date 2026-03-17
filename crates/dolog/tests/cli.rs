@@ -479,6 +479,59 @@ fn log_export_writes_jsonl_and_deletes_exported_rows() {
     std::fs::remove_file(output_path).expect("remove temp export");
 }
 
+#[test]
+fn log_status_reports_pending_rows_by_table_and_operation() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    connection
+        .execute("INSERT INTO users (email) VALUES (?1)", ["ada@example.com"])
+        .expect("insert user");
+    connection
+        .execute(
+            "UPDATE users SET email = ?1 WHERE id = 1",
+            ["ada+updated@example.com"],
+        )
+        .expect("update user");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["log", "status", db_path.to_str().expect("utf8 path")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Pending log rows for"))
+        .stdout(predicate::str::contains("TABLE"))
+        .stdout(predicate::str::contains("users"))
+        .stdout(predicate::str::contains("INSERT"))
+        .stdout(predicate::str::contains("UPDATE"))
+        .stdout(predicate::str::contains("TOTAL"));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
 fn trigger_names(connection: &Connection) -> Vec<String> {
     let mut statement = connection
         .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")

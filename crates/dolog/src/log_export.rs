@@ -35,6 +35,34 @@ pub struct ExportResult {
     pub exported: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogStatusRow {
+    pub table_name: String,
+    pub operation: String,
+    pub count: i64,
+}
+
+pub fn log_status(connection: &Connection, log_table: &str) -> Result<Vec<LogStatusRow>, AppError> {
+    let sql = format!(
+        "SELECT table_name, operation, COUNT(*)
+         FROM {}
+         GROUP BY table_name, operation
+         ORDER BY table_name, operation",
+        quote_ident(log_table)
+    );
+
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map([], |row| {
+        Ok(LogStatusRow {
+            table_name: row.get(0)?,
+            operation: row.get(1)?,
+            count: row.get(2)?,
+        })
+    })?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+}
+
 #[derive(Debug, Serialize)]
 struct LogEntry {
     id: i64,
