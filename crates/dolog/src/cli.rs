@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -63,8 +63,8 @@ enum TriggerAction {
 struct TriggerArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long)]
-    table: String,
+    #[arg(long, required = true)]
+    table: Vec<String>,
     #[arg(long, default_value = "_dolog_changes")]
     log_table: String,
     #[arg(long, default_value = "dolog")]
@@ -78,7 +78,7 @@ struct TriggerArgs {
 impl TriggerArgs {
     fn run(
         self,
-        planner: impl FnOnce(
+        planner: impl Fn(
             &TriggerManager,
             &rusqlite::Connection,
             &str,
@@ -87,7 +87,8 @@ impl TriggerArgs {
     ) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
-        let plan = planner(&manager, &connection, &self.table)?;
+        let tables = unique_tables(self.table);
+        let plan = collect_plan(&manager, &connection, &tables, planner)?;
 
         if self.dry_run {
             print_statements(plan.statements());
@@ -101,7 +102,10 @@ impl TriggerArgs {
         }
 
         manager.apply_plan(&mut connection, &plan)?;
-        println!("{success_verb} triggers for table '{}'.", self.table);
+        println!(
+            "{success_verb} triggers for {}.",
+            format_table_targets(&tables)
+        );
         Ok(())
     }
 }
@@ -111,7 +115,7 @@ struct ListTriggerArgs {
     #[arg(long)]
     db: PathBuf,
     #[arg(long)]
-    table: Option<String>,
+    table: Vec<String>,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
 }
@@ -120,7 +124,16 @@ impl ListTriggerArgs {
     fn run(self) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
         let manager = TriggerManager::new("_dolog_changes".to_owned(), self.trigger_prefix);
-        let triggers = manager.list_triggers(&connection, self.table.as_deref())?;
+        let tables = unique_tables(self.table);
+        let triggers = if tables.is_empty() {
+            manager.list_triggers(&connection, None)?
+        } else {
+            let mut triggers = Vec::new();
+            for table in &tables {
+                triggers.extend(manager.list_triggers(&connection, Some(table))?);
+            }
+            triggers
+        };
 
         if triggers.is_empty() {
             println!("No managed triggers found.");
@@ -171,8 +184,8 @@ enum PreviewAction {
 struct PreviewArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long)]
-    table: String,
+    #[arg(long, required = true)]
+    table: Vec<String>,
     #[arg(long, default_value = "_dolog_changes")]
     log_table: String,
     #[arg(long, default_value = "dolog")]
@@ -182,7 +195,7 @@ struct PreviewArgs {
 impl PreviewArgs {
     fn run(
         self,
-        planner: impl FnOnce(
+        planner: impl Fn(
             &TriggerManager,
             &rusqlite::Connection,
             &str,
@@ -191,7 +204,8 @@ impl PreviewArgs {
     ) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
-        let plan = planner(&manager, &connection, &self.table)?;
+        let tables = unique_tables(self.table);
+        let plan = collect_plan(&manager, &connection, &tables, planner)?;
         print_statements(plan.statements());
         Ok(())
     }
@@ -212,4 +226,46 @@ fn write_plan(path: &PathBuf, plan: &ExecutionPlan) -> Result<(), AppError> {
         path: path.display().to_string(),
         source,
     })
+}
+
+fn collect_plan(
+    manager: &TriggerManager,
+    connection: &rusqlite::Connection,
+    tables: &[String],
+    planner: impl Fn(&TriggerManager, &rusqlite::Connection, &str) -> Result<ExecutionPlan, AppError>,
+) -> Result<ExecutionPlan, AppError> {
+    let mut statements = Vec::new();
+
+    for table in tables {
+        let plan = planner(manager, connection, table)?;
+        statements.extend_from_slice(plan.statements());
+    }
+
+    Ok(ExecutionPlan::from_statements(statements))
+}
+
+fn unique_tables(tables: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+
+    for table in tables {
+        if seen.insert(table.clone()) {
+            unique.push(table);
+        }
+    }
+
+    unique
+}
+
+fn format_table_targets(tables: &[String]) -> String {
+    if tables.len() == 1 {
+        format!("table '{}'", tables[0])
+    } else {
+        let joined = tables
+            .iter()
+            .map(|table| format!("'{table}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("tables {joined}")
+    }
 }

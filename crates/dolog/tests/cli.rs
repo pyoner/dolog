@@ -89,6 +89,48 @@ fn create_output_writes_sql_file_without_modifying_database() {
 }
 
 #[test]
+fn create_supports_repeated_table_flags() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );",
+        )
+        .expect("create tables");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--table",
+            "posts",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created triggers for tables 'users', 'posts'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(trigger_names(&connection).len(), 6);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn list_reports_created_triggers_from_real_sqlite_database() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
@@ -134,6 +176,49 @@ fn list_reports_created_triggers_from_real_sqlite_database() {
         .stdout(predicate::str::contains("dolog_users_delete (users)"));
 
     assert_eq!(trigger_names(&connection).len(), 3);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn preview_create_supports_repeated_table_flags() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );",
+        )
+        .expect("create tables");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "preview",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--table",
+            "posts",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_users_insert\"",
+        ))
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_posts_insert\"",
+        ));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }

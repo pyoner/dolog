@@ -261,6 +261,10 @@ impl ExecutionPlan {
         Self { statements }
     }
 
+    pub fn from_statements(statements: Vec<String>) -> Self {
+        Self { statements }
+    }
+
     pub fn statements(&self) -> &[String] {
         &self.statements
     }
