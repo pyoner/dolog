@@ -105,14 +105,14 @@ fn planning_and_dry_run_do_not_modify_real_sqlite_db() {
     let manager = TriggerManager::new("_dolog_changes".to_owned(), "dolog".to_owned());
 
     let create_plan = manager
-        .plan_create(&connection, "users")
+        .plan_create(&connection, "users", &dolog::trigger::Operation::all())
         .expect("plan create");
     assert_eq!(create_plan.statements().len(), 4);
     assert!(trigger_names(&connection).is_empty());
     assert!(!table_exists(&connection, "_dolog_changes"));
 
     let update_plan = manager
-        .plan_update(&connection, "users")
+        .plan_update(&connection, "users", &dolog::trigger::Operation::all())
         .expect("plan update");
     assert_eq!(update_plan.statements().len(), 7);
     assert!(trigger_names(&connection).is_empty());
@@ -125,7 +125,7 @@ fn planning_and_dry_run_do_not_modify_real_sqlite_db() {
     assert!(table_exists(&connection, "_dolog_changes"));
 
     let delete_plan = manager
-        .plan_delete(&connection, "users")
+        .plan_delete(&connection, "users", &dolog::trigger::Operation::all())
         .expect("plan delete");
     assert_eq!(delete_plan.statements().len(), 3);
 

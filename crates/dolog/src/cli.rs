@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::trigger::{AppError, ExecutionPlan, TriggerManager, open_connection};
+use crate::trigger::{AppError, ExecutionPlan, Operation, TriggerManager, open_connection};
 
 #[derive(Debug, Parser)]
 #[command(name = "dolog")]
@@ -33,15 +33,21 @@ impl TriggerCommand {
     fn run(self) -> Result<(), AppError> {
         match self.action {
             TriggerAction::Create(args) => args.run(
-                |manager, connection, table| manager.plan_create(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_create(connection, table, operations)
+                },
                 "Created",
             ),
             TriggerAction::Update(args) => args.run(
-                |manager, connection, table| manager.plan_update(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_update(connection, table, operations)
+                },
                 "Updated",
             ),
             TriggerAction::Delete(args) => args.run(
-                |manager, connection, table| manager.plan_delete(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_delete(connection, table, operations)
+                },
                 "Deleted",
             ),
             TriggerAction::List(args) => args.run(),
@@ -75,6 +81,8 @@ struct TriggerArgs {
     log_table: String,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
+    #[arg(long, value_enum)]
+    operation: Vec<OperationArg>,
     #[arg(long, conflicts_with = "output")]
     dry_run: bool,
     #[arg(long, value_name = "FILE", conflicts_with = "dry_run")]
@@ -88,13 +96,15 @@ impl TriggerArgs {
             &TriggerManager,
             &rusqlite::Connection,
             &str,
+            &[Operation],
         ) -> Result<ExecutionPlan, AppError>,
         success_verb: &str,
     ) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
         let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
-        let plan = collect_plan(&manager, &connection, &tables, planner)?;
+        let operations = resolve_operations(self.operation);
+        let plan = collect_plan(&manager, &connection, &tables, &operations, planner)?;
 
         if self.dry_run {
             print_statements(plan.statements());
@@ -172,15 +182,21 @@ impl PreviewTriggerArgs {
     fn run(self) -> Result<(), AppError> {
         match self.action {
             PreviewAction::Create(args) => args.run(
-                |manager, connection, table| manager.plan_create(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_create(connection, table, operations)
+                },
                 "",
             ),
             PreviewAction::Update(args) => args.run(
-                |manager, connection, table| manager.plan_update(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_update(connection, table, operations)
+                },
                 "",
             ),
             PreviewAction::Delete(args) => args.run(
-                |manager, connection, table| manager.plan_delete(connection, table),
+                |manager, connection, table, operations| {
+                    manager.plan_delete(connection, table, operations)
+                },
                 "",
             ),
         }
@@ -198,7 +214,11 @@ enum PreviewAction {
 struct PreviewArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long, conflicts_with = "all_tables")]
+    #[arg(
+        long,
+        conflicts_with = "all_tables",
+        required_unless_present = "all_tables"
+    )]
     table: Vec<String>,
     #[arg(long, conflicts_with = "table")]
     all_tables: bool,
@@ -206,6 +226,8 @@ struct PreviewArgs {
     log_table: String,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
+    #[arg(long, value_enum)]
+    operation: Vec<OperationArg>,
 }
 
 impl PreviewArgs {
@@ -215,16 +237,25 @@ impl PreviewArgs {
             &TriggerManager,
             &rusqlite::Connection,
             &str,
+            &[Operation],
         ) -> Result<ExecutionPlan, AppError>,
         _unused_success_verb: &str,
     ) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
         let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
-        let plan = collect_plan(&manager, &connection, &tables, planner)?;
+        let operations = resolve_operations(self.operation);
+        let plan = collect_plan(&manager, &connection, &tables, &operations, planner)?;
         print_statements(plan.statements());
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, ValueEnum)]
+enum OperationArg {
+    Insert,
+    Update,
+    Delete,
 }
 
 fn print_statements(statements: &[String]) {
@@ -248,12 +279,18 @@ fn collect_plan(
     manager: &TriggerManager,
     connection: &rusqlite::Connection,
     tables: &[String],
-    planner: impl Fn(&TriggerManager, &rusqlite::Connection, &str) -> Result<ExecutionPlan, AppError>,
+    operations: &[Operation],
+    planner: impl Fn(
+        &TriggerManager,
+        &rusqlite::Connection,
+        &str,
+        &[Operation],
+    ) -> Result<ExecutionPlan, AppError>,
 ) -> Result<ExecutionPlan, AppError> {
     let mut statements = Vec::new();
 
     for table in tables {
-        let plan = planner(manager, connection, table)?;
+        let plan = planner(manager, connection, table, operations)?;
         statements.extend_from_slice(plan.statements());
     }
 
@@ -284,6 +321,29 @@ fn resolve_tables(
     }
 
     Ok(unique_tables(tables))
+}
+
+fn resolve_operations(operations: Vec<OperationArg>) -> Vec<Operation> {
+    if operations.is_empty() {
+        return Operation::all().to_vec();
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut unique = Vec::new();
+
+    for operation in operations {
+        let operation = match operation {
+            OperationArg::Insert => Operation::Insert,
+            OperationArg::Update => Operation::Update,
+            OperationArg::Delete => Operation::Delete,
+        };
+
+        if seen.insert(operation) {
+            unique.push(operation);
+        }
+    }
+
+    unique
 }
 
 fn format_table_targets(tables: &[String]) -> String {

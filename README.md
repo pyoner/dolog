@@ -71,6 +71,13 @@ Create triggers for a table:
 cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users
 ```
 
+Create triggers only for specific operations:
+
+```bash
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --operation insert
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --operation insert --operation update
+```
+
 Create triggers for multiple tables:
 
 ```bash
@@ -89,6 +96,12 @@ Update triggers after a schema change:
 cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users
 ```
 
+Update only specific operations after a schema change:
+
+```bash
+cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --operation insert
+```
+
 Delete triggers for a table:
 
 ```bash
@@ -101,6 +114,12 @@ Preview SQL without modifying the database:
 cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --dry-run
 cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --dry-run
 cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users --dry-run
+```
+
+Preview only selected operations:
+
+```bash
+cargo run -p dolog -- trigger preview update --db /path/to/app.sqlite --table users --operation insert
 ```
 
 Preview multiple tables:
@@ -181,6 +200,9 @@ The test suite includes:
 ## Notes
 
 - `update` should be run after schema changes so trigger JSON reflects the current table columns.
+- `--operation` can be repeated to target specific trigger types: `insert`, `update`, `delete`.
+- If `--operation` is omitted, `dolog` uses all three operations.
+- `update` refreshes only the selected operations. It does not remove unrelated trigger types.
 - The log table defaults to `_dolog_changes`.
 - The trigger prefix defaults to `dolog`.
 - `--table` can be repeated to target multiple tables in one command.

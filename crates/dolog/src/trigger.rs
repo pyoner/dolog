@@ -24,17 +24,17 @@ impl TriggerManager {
     }
 
     pub fn create(&self, connection: &mut Connection, table: &str) -> Result<(), AppError> {
-        let plan = self.plan_create(connection, table)?;
+        let plan = self.plan_create(connection, table, &Operation::all())?;
         self.apply_plan(connection, &plan)
     }
 
     pub fn update(&self, connection: &mut Connection, table: &str) -> Result<(), AppError> {
-        let plan = self.plan_update(connection, table)?;
+        let plan = self.plan_update(connection, table, &Operation::all())?;
         self.apply_plan(connection, &plan)
     }
 
     pub fn delete(&self, connection: &mut Connection, table: &str) -> Result<(), AppError> {
-        let plan = self.plan_delete(connection, table)?;
+        let plan = self.plan_delete(connection, table, &Operation::all())?;
         self.apply_plan(connection, &plan)
     }
 
@@ -43,7 +43,9 @@ impl TriggerManager {
         connection: &Connection,
         table: &str,
     ) -> Result<Vec<String>, AppError> {
-        Ok(self.plan_create(connection, table)?.into_statements())
+        Ok(self
+            .plan_create(connection, table, &Operation::all())?
+            .into_statements())
     }
 
     pub fn preview_update(
@@ -51,7 +53,9 @@ impl TriggerManager {
         connection: &Connection,
         table: &str,
     ) -> Result<Vec<String>, AppError> {
-        Ok(self.plan_update(connection, table)?.into_statements())
+        Ok(self
+            .plan_update(connection, table, &Operation::all())?
+            .into_statements())
     }
 
     pub fn preview_delete(
@@ -59,19 +63,23 @@ impl TriggerManager {
         connection: &Connection,
         table: &str,
     ) -> Result<Vec<String>, AppError> {
-        Ok(self.plan_delete(connection, table)?.into_statements())
+        Ok(self
+            .plan_delete(connection, table, &Operation::all())?
+            .into_statements())
     }
 
     pub fn plan_create(
         &self,
         connection: &Connection,
         table: &str,
+        operations: &[Operation],
     ) -> Result<ExecutionPlan, AppError> {
         let target = self.describe_target(connection, table)?;
         let mut statements = vec![self.create_log_table_sql()];
         statements.extend(
-            Operation::all()
-                .into_iter()
+            operations
+                .iter()
+                .copied()
                 .map(|operation| self.create_trigger_sql(&target, operation)),
         );
         Ok(ExecutionPlan::new(statements))
@@ -81,17 +89,20 @@ impl TriggerManager {
         &self,
         connection: &Connection,
         table: &str,
+        operations: &[Operation],
     ) -> Result<ExecutionPlan, AppError> {
         let target = self.describe_target(connection, table)?;
         let mut statements = vec![self.create_log_table_sql()];
         statements.extend(
-            Operation::all()
-                .into_iter()
+            operations
+                .iter()
+                .copied()
                 .map(|operation| self.drop_trigger_sql(&target.name, operation)),
         );
         statements.extend(
-            Operation::all()
-                .into_iter()
+            operations
+                .iter()
+                .copied()
                 .map(|operation| self.create_trigger_sql(&target, operation)),
         );
         Ok(ExecutionPlan::new(statements))
@@ -101,11 +112,13 @@ impl TriggerManager {
         &self,
         connection: &Connection,
         table: &str,
+        operations: &[Operation],
     ) -> Result<ExecutionPlan, AppError> {
         let target = self.describe_target(connection, table)?;
         Ok(ExecutionPlan::new(
-            Operation::all()
-                .into_iter()
+            operations
+                .iter()
+                .copied()
                 .map(|operation| self.drop_trigger_sql(&target.name, operation))
                 .collect(),
         ))
@@ -288,19 +301,19 @@ impl ExecutionPlan {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Operation {
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum Operation {
     Insert,
     Update,
     Delete,
 }
 
 impl Operation {
-    fn all() -> [Self; 3] {
+    pub fn all() -> [Self; 3] {
         [Self::Insert, Self::Update, Self::Delete]
     }
 
-    fn as_suffix(self) -> &'static str {
+    pub fn as_suffix(self) -> &'static str {
         match self {
             Self::Insert => "insert",
             Self::Update => "update",

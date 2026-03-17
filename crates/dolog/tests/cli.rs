@@ -46,6 +46,47 @@ fn create_dry_run_prints_sql_without_modifying_database() {
 }
 
 #[test]
+fn create_supports_operation_selection() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created triggers for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(
+        trigger_names(&connection),
+        vec!["dolog_users_insert".to_owned()]
+    );
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn create_output_writes_sql_file_without_modifying_database() {
     let db_path = unique_db_path();
     let output_path = unique_sql_path();
@@ -89,6 +130,61 @@ fn create_output_writes_sql_file_without_modifying_database() {
 }
 
 #[test]
+fn update_only_refreshes_selected_operations() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "update",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(
+        trigger_names(&connection),
+        vec![
+            "dolog_users_delete".to_owned(),
+            "dolog_users_insert".to_owned(),
+            "dolog_users_update".to_owned()
+        ]
+    );
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn create_supports_repeated_table_flags() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
@@ -126,6 +222,60 @@ fn create_supports_repeated_table_flags() {
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
     assert_eq!(trigger_names(&connection).len(), 6);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn delete_only_removes_selected_operations() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "delete",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "delete",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(
+        trigger_names(&connection),
+        vec![
+            "dolog_users_insert".to_owned(),
+            "dolog_users_update".to_owned()
+        ]
+    );
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -317,6 +467,46 @@ fn preview_create_supports_repeated_table_flags() {
         .stdout(predicate::str::contains(
             "CREATE TRIGGER \"dolog_posts_insert\"",
         ));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn preview_update_supports_operation_selection() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "preview",
+            "update",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "DROP TRIGGER IF EXISTS \"dolog_users_insert\";",
+        ))
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_users_insert\"",
+        ))
+        .stdout(predicate::str::contains("DROP TRIGGER IF EXISTS \"dolog_users_update\";").not());
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
