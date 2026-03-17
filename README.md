@@ -164,8 +164,11 @@ cargo run -p dolog -- trigger status /path/to/app.sqlite --table users
 Example status output:
 
 ```text
-users | insert: yes | update: yes | delete: yes
-posts | insert: yes | update: no | delete: yes
+Trigger status for /path/to/app.sqlite
+
+TABLE  INSERT  UPDATE  DELETE
+users  yes     yes     yes
+posts  yes     no      yes
 ```
 
 ## How It Works

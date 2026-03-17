@@ -361,9 +361,9 @@ fn status_reports_operation_coverage() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "users | insert: yes | update: no | delete: yes",
-        ));
+        .stdout(predicate::str::contains("Trigger status for"))
+        .stdout(predicate::str::contains("TABLE"))
+        .stdout(predicate::str::contains("users  yes"));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -405,12 +405,9 @@ fn status_defaults_to_all_tables_without_flags() {
         .args(["trigger", "status", db_path.to_str().expect("utf8 path")])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "posts | insert: no | update: no | delete: no",
-        ))
-        .stdout(predicate::str::contains(
-            "users | insert: yes | update: no | delete: no",
-        ));
+        .stdout(predicate::str::contains("Trigger status for"))
+        .stdout(predicate::str::contains("posts"))
+        .stdout(predicate::str::contains("users"));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }

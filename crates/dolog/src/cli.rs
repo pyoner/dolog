@@ -152,15 +152,15 @@ impl StatusArgs {
             return Ok(());
         }
 
-        for table in tables {
-            let status = TableStatus::from_triggers(&self.trigger_prefix, &table, &triggers);
-            println!(
-                "{table} | insert: {} | update: {} | delete: {}",
-                yes_no(status.insert),
-                yes_no(status.update),
-                yes_no(status.delete)
-            );
-        }
+        let rows = tables
+            .into_iter()
+            .map(|table| {
+                let status = TableStatus::from_triggers(&self.trigger_prefix, &table, &triggers);
+                StatusRow { table, status }
+            })
+            .collect::<Vec<_>>();
+
+        print_status_table(&self.db, &rows);
 
         Ok(())
     }
@@ -178,6 +178,11 @@ struct TableStatus {
     insert: bool,
     update: bool,
     delete: bool,
+}
+
+struct StatusRow {
+    table: String,
+    status: TableStatus,
 }
 
 impl TableStatus {
@@ -211,6 +216,37 @@ fn operation_from_trigger_name(prefix: &str, table: &str, trigger_name: &str) ->
 
 fn yes_no(value: bool) -> &'static str {
     if value { "yes" } else { "no" }
+}
+
+fn print_status_table(db: &PathBuf, rows: &[StatusRow]) {
+    let table_width = rows
+        .iter()
+        .map(|row| row.table.len())
+        .max()
+        .unwrap_or(5)
+        .max("TABLE".len());
+
+    println!("Trigger status for {}", db.display());
+    println!();
+    println!(
+        "{:<table_width$}  {:<6}  {:<6}  {:<6}",
+        "TABLE",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        table_width = table_width,
+    );
+
+    for row in rows {
+        println!(
+            "{:<table_width$}  {:<6}  {:<6}  {:<6}",
+            row.table,
+            yes_no(row.status.insert),
+            yes_no(row.status.update),
+            yes_no(row.status.delete),
+            table_width = table_width,
+        );
+    }
 }
 
 fn print_statements(statements: &[String]) {
