@@ -368,6 +368,53 @@ fn status_reports_operation_coverage() {
     std::fs::remove_file(db_path).expect("remove temp db");
 }
 
+#[test]
+fn status_defaults_to_all_tables_without_flags() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );",
+        )
+        .expect("create tables");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["trigger", "status", db_path.to_str().expect("utf8 path")])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "posts | insert: no | update: no | delete: no",
+        ))
+        .stdout(predicate::str::contains(
+            "users | insert: yes | update: no | delete: no",
+        ));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
 fn trigger_names(connection: &Connection) -> Vec<String> {
     let mut statement = connection
         .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")

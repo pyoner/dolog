@@ -59,7 +59,7 @@ You can then run the CLI against that file:
 
 ```bash
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users
-cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite --all-tables
+cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
 ```
 
@@ -157,6 +157,7 @@ cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables --output m
 Show trigger status:
 
 ```bash
+cargo run -p dolog -- trigger status /path/to/app.sqlite
 cargo run -p dolog -- trigger status /path/to/app.sqlite --table users
 cargo run -p dolog -- trigger status /path/to/app.sqlite --all-tables
 ```
@@ -206,5 +207,6 @@ The test suite includes:
 - The trigger prefix defaults to `dolog`.
 - `--table` can be repeated to target multiple tables in one command.
 - `--all-tables` targets all non-SQLite tables except the dolog log table.
+- `trigger status` defaults to all user tables when no table selector is provided.
 - `--dry-run` prints the SQL plan to stdout.
 - `--output <FILE>` writes the SQL plan to a file instead of applying it.
