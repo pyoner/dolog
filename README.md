@@ -159,7 +159,6 @@ Show trigger status:
 ```bash
 cargo run -p dolog -- trigger status /path/to/app.sqlite
 cargo run -p dolog -- trigger status /path/to/app.sqlite --table users
-cargo run -p dolog -- trigger status /path/to/app.sqlite --all-tables
 ```
 
 Example status output:

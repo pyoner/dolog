@@ -128,10 +128,8 @@ impl TriggerArgs {
 #[derive(Debug, Args)]
 struct StatusArgs {
     db: PathBuf,
-    #[arg(long, conflicts_with = "all_tables")]
+    #[arg(long)]
     table: Vec<String>,
-    #[arg(long, conflicts_with = "table")]
-    all_tables: bool,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
     #[arg(long, default_value = "_dolog_changes")]
@@ -142,10 +140,10 @@ impl StatusArgs {
     fn run(self) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix.clone());
-        let tables = if self.all_tables || !self.table.is_empty() {
-            resolve_tables(&manager, &connection, self.table, self.all_tables)?
-        } else {
+        let tables = if self.table.is_empty() {
             manager.list_target_tables(&connection)?
+        } else {
+            unique_tables(self.table)
         };
         let triggers = manager.list_triggers(&connection, None)?;
 
