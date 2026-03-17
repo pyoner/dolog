@@ -8,6 +8,7 @@ The current milestone focuses on trigger lifecycle management:
 - delete triggers
 - show trigger coverage status
 - write planned SQL to stdout or a file before applying it
+- export captured change rows from SQLite to a file
 
 ## Status
 
@@ -61,6 +62,7 @@ You can then run the CLI against that file:
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users
 cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite
 cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
+cargo run -p dolog -- log export /home/pyoner/repo/dolog/dev.sqlite --output /home/pyoner/repo/dolog/changes.jsonl
 ```
 
 ## Commands
@@ -171,6 +173,18 @@ users  yes     yes     yes
 posts  yes     no      yes
 ```
 
+Export captured logs to JSON Lines:
+
+```bash
+cargo run -p dolog -- log export /path/to/app.sqlite --output /path/to/changes.jsonl
+```
+
+Export only the next batch:
+
+```bash
+cargo run -p dolog -- log export /path/to/app.sqlite --output /path/to/changes.jsonl --limit 100
+```
+
 ## How It Works
 
 For a target table, `dolog` can generate up to three SQLite triggers:
@@ -186,6 +200,16 @@ These triggers write rows into `_dolog_changes` with:
 - `changed_at`
 
 `old_values` and `new_values` are stored as JSON generated from the table columns visible at trigger creation time.
+
+## Log Export
+
+`dolog log export` reads rows from `_dolog_changes`, appends them to a JSONL file, and then deletes the exported rows from the database.
+
+Example JSONL record:
+
+```json
+{"id":1,"table_name":"users","operation":"INSERT","old_values":null,"new_values":{"id":1,"email":"ada@example.com"},"changed_at":"2026-03-17 12:00:00"}
+```
 
 ## Test
 
@@ -212,3 +236,4 @@ The test suite includes:
 - `trigger status` defaults to all user tables when no table selector is provided.
 - `--dry-run` prints the SQL plan to stdout.
 - `--output <FILE>` writes the SQL plan to a file instead of applying it.
+- `log export` appends exported rows to the output file and removes those rows from `_dolog_changes`.

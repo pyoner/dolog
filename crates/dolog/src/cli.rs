@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+use crate::log_export::export_logs;
 use crate::trigger::{
     AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
@@ -16,13 +17,59 @@ pub struct Cli {
 
 pub fn run(cli: Cli) -> Result<(), AppError> {
     match cli.command {
+        Command::Log(log) => log.run(),
         Command::Trigger(trigger) => trigger.run(),
     }
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Log(LogCommand),
     Trigger(TriggerCommand),
+}
+
+#[derive(Debug, Args)]
+struct LogCommand {
+    #[command(subcommand)]
+    action: LogAction,
+}
+
+impl LogCommand {
+    fn run(self) -> Result<(), AppError> {
+        match self.action {
+            LogAction::Export(args) => args.run(),
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum LogAction {
+    Export(LogExportArgs),
+}
+
+#[derive(Debug, Args)]
+struct LogExportArgs {
+    db: PathBuf,
+    #[arg(long, value_name = "FILE")]
+    output: PathBuf,
+    #[arg(long, default_value = "_dolog_changes")]
+    log_table: String,
+    #[arg(long)]
+    limit: Option<usize>,
+}
+
+impl LogExportArgs {
+    fn run(self) -> Result<(), AppError> {
+        let mut connection = open_connection(&self.db)?;
+        let result = export_logs(&mut connection, &self.log_table, &self.output, self.limit)?;
+
+        println!(
+            "Exported {} change rows to '{}'.",
+            result.exported,
+            self.output.display()
+        );
+        Ok(())
+    }
 }
 
 #[derive(Debug, Args)]

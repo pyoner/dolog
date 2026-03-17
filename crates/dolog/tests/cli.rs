@@ -412,6 +412,73 @@ fn status_defaults_to_all_tables_without_flags() {
     std::fs::remove_file(db_path).expect("remove temp db");
 }
 
+#[test]
+fn log_export_writes_jsonl_and_deletes_exported_rows() {
+    let db_path = unique_db_path();
+    let output_path = unique_jsonl_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    connection
+        .execute("INSERT INTO users (email) VALUES (?1)", ["ada@example.com"])
+        .expect("insert user");
+    connection
+        .execute(
+            "UPDATE users SET email = ?1 WHERE id = 1",
+            ["ada+updated@example.com"],
+        )
+        .expect("update user");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            db_path.to_str().expect("utf8 path"),
+            "--output",
+            output_path.to_str().expect("utf8 path"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exported 2 change rows to"));
+
+    let exported = std::fs::read_to_string(&output_path).expect("read exported file");
+    assert!(exported.contains("\"table_name\":\"users\""));
+    assert!(exported.contains("\"operation\":\"INSERT\""));
+    assert!(exported.contains("\"operation\":\"UPDATE\""));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let remaining: i64 = connection
+        .query_row("SELECT COUNT(*) FROM _dolog_changes", [], |row| row.get(0))
+        .expect("count remaining logs");
+    assert_eq!(remaining, 0);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+    std::fs::remove_file(output_path).expect("remove temp export");
+}
+
 fn trigger_names(connection: &Connection) -> Vec<String> {
     let mut statement = connection
         .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name")
@@ -455,4 +522,13 @@ fn unique_sql_path() -> std::path::PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!("dolog_cli_test_{nanos}.sql"))
+}
+
+fn unique_jsonl_path() -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+
+    std::env::temp_dir().join(format!("dolog_cli_test_{nanos}.jsonl"))
 }

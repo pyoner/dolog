@@ -395,6 +395,8 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error("table '{0}' does not exist")]
     MissingTable(String),
     #[error("table '{0}' has no columns")]
