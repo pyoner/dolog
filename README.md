@@ -91,6 +91,14 @@ cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --dr
 cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users --dry-run
 ```
 
+Write SQL to a file instead of applying it:
+
+```bash
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --output migrations/001_create_users_triggers.sql
+cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --output migrations/002_update_users_triggers.sql
+cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users --output migrations/003_delete_users_triggers.sql
+```
+
 Preview explicit subcommands:
 
 ```bash
@@ -139,3 +147,5 @@ The test suite includes:
 - `update` should be run after schema changes so trigger JSON reflects the current table columns.
 - The log table defaults to `_dolog_changes`.
 - The trigger prefix defaults to `dolog`.
+- `--dry-run` prints the SQL plan to stdout.
+- `--output <FILE>` writes the SQL plan to a file instead of applying it.

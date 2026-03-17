@@ -358,6 +358,12 @@ pub enum AppError {
         #[source]
         source: rusqlite::Error,
     },
+    #[error("failed to write SQL plan to '{path}': {source}")]
+    WriteOutput {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("table '{0}' does not exist")]
     MissingTable(String),
     #[error("table '{0}' has no columns")]

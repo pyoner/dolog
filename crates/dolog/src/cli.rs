@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -69,8 +69,10 @@ struct TriggerArgs {
     log_table: String,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "output")]
     dry_run: bool,
+    #[arg(long, value_name = "FILE", conflicts_with = "dry_run")]
+    output: Option<PathBuf>,
 }
 
 impl TriggerArgs {
@@ -89,6 +91,12 @@ impl TriggerArgs {
 
         if self.dry_run {
             print_statements(plan.statements());
+            return Ok(());
+        }
+
+        if let Some(output_path) = self.output {
+            write_plan(&output_path, &plan)?;
+            println!("Wrote SQL plan to '{}'.", output_path.display());
             return Ok(());
         }
 
@@ -196,4 +204,12 @@ fn print_statements(statements: &[String]) {
         }
         println!("{statement}");
     }
+}
+
+fn write_plan(path: &PathBuf, plan: &ExecutionPlan) -> Result<(), AppError> {
+    let contents = format!("{}\n", plan.statements().join("\n\n"));
+    fs::write(path, contents).map_err(|source| AppError::WriteOutput {
+        path: path.display().to_string(),
+        source,
+    })
 }
