@@ -45,6 +45,24 @@ cargo build -p dolog
 ./target/debug/dolog --help
 ```
 
+## Example Database
+
+This repo includes a simple example seed file at [`seed.sql`](/home/pyoner/repo/dolog/seed.sql).
+
+Create a local example database:
+
+```bash
+sqlite3 dev.sqlite < seed.sql
+```
+
+You can then run the CLI against that file:
+
+```bash
+cargo run -p dolog -- trigger create --db /home/pyoner/repo/dolog/dev.sqlite --table users
+cargo run -p dolog -- trigger list --db /home/pyoner/repo/dolog/dev.sqlite
+cargo run -p dolog -- trigger create --db /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
+```
+
 ## Commands
 
 Create triggers for a table:
