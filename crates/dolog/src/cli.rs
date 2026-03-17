@@ -2,7 +2,9 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::trigger::{AppError, ExecutionPlan, Operation, TriggerManager, open_connection};
+use crate::trigger::{
+    AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "dolog")]
@@ -50,8 +52,7 @@ impl TriggerCommand {
                 },
                 "Deleted",
             ),
-            TriggerAction::List(args) => args.run(),
-            TriggerAction::Preview(args) => args.run(),
+            TriggerAction::Status(args) => args.run(),
         }
     }
 }
@@ -61,13 +62,11 @@ enum TriggerAction {
     Create(TriggerArgs),
     Update(TriggerArgs),
     Delete(TriggerArgs),
-    List(ListTriggerArgs),
-    Preview(PreviewTriggerArgs),
+    Status(StatusArgs),
 }
 
 #[derive(Debug, Args)]
 struct TriggerArgs {
-    #[arg(long)]
     db: PathBuf,
     #[arg(
         long,
@@ -127,8 +126,7 @@ impl TriggerArgs {
 }
 
 #[derive(Debug, Args)]
-struct ListTriggerArgs {
-    #[arg(long)]
+struct StatusArgs {
     db: PathBuf,
     #[arg(
         long,
@@ -144,109 +142,28 @@ struct ListTriggerArgs {
     log_table: String,
 }
 
-impl ListTriggerArgs {
+impl StatusArgs {
     fn run(self) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
-        let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
+        let manager = TriggerManager::new(self.log_table, self.trigger_prefix.clone());
         let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
-        let triggers = if tables.is_empty() {
-            manager.list_triggers(&connection, None)?
-        } else {
-            let mut triggers = Vec::new();
-            for table in &tables {
-                triggers.extend(manager.list_triggers(&connection, Some(table))?);
-            }
-            triggers
-        };
+        let triggers = manager.list_triggers(&connection, None)?;
 
-        if triggers.is_empty() {
-            println!("No managed triggers found.");
+        if tables.is_empty() {
+            println!("No matching tables found.");
             return Ok(());
         }
 
-        for trigger in triggers {
-            println!("{} ({})", trigger.name, trigger.table);
+        for table in tables {
+            let status = TableStatus::from_triggers(&self.trigger_prefix, &table, &triggers);
+            println!(
+                "{table} | insert: {} | update: {} | delete: {}",
+                yes_no(status.insert),
+                yes_no(status.update),
+                yes_no(status.delete)
+            );
         }
 
-        Ok(())
-    }
-}
-
-#[derive(Debug, Args)]
-struct PreviewTriggerArgs {
-    #[command(subcommand)]
-    action: PreviewAction,
-}
-
-impl PreviewTriggerArgs {
-    fn run(self) -> Result<(), AppError> {
-        match self.action {
-            PreviewAction::Create(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_create(connection, table, operations)
-                },
-                "",
-            ),
-            PreviewAction::Update(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_update(connection, table, operations)
-                },
-                "",
-            ),
-            PreviewAction::Delete(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_delete(connection, table, operations)
-                },
-                "",
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Subcommand)]
-enum PreviewAction {
-    Create(PreviewArgs),
-    Update(PreviewArgs),
-    Delete(PreviewArgs),
-}
-
-#[derive(Debug, Args)]
-struct PreviewArgs {
-    #[arg(long)]
-    db: PathBuf,
-    #[arg(
-        long,
-        conflicts_with = "all_tables",
-        required_unless_present = "all_tables"
-    )]
-    table: Vec<String>,
-    #[arg(long, conflicts_with = "table")]
-    all_tables: bool,
-    #[arg(long, default_value = "_dolog_changes")]
-    log_table: String,
-    #[arg(long, default_value = "dolog")]
-    trigger_prefix: String,
-    #[arg(long, value_enum)]
-    operation: Vec<OperationArg>,
-}
-
-impl PreviewArgs {
-    fn run(
-        self,
-        planner: impl Fn(
-            &TriggerManager,
-            &rusqlite::Connection,
-            &str,
-            &[Operation],
-        ) -> Result<ExecutionPlan, AppError>,
-        _unused_success_verb: &str,
-    ) -> Result<(), AppError> {
-        let connection = open_connection(&self.db)?;
-        let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
-        let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
-        let operations = resolve_operations(self.operation);
-        let plan = collect_plan(&manager, &connection, &tables, &operations, planner)?;
-        print_statements(plan.statements());
         Ok(())
     }
 }
@@ -256,6 +173,46 @@ enum OperationArg {
     Insert,
     Update,
     Delete,
+}
+
+#[derive(Default)]
+struct TableStatus {
+    insert: bool,
+    update: bool,
+    delete: bool,
+}
+
+impl TableStatus {
+    fn from_triggers(prefix: &str, table: &str, triggers: &[ManagedTrigger]) -> Self {
+        let mut status = Self::default();
+
+        for trigger in triggers.iter().filter(|trigger| trigger.table == table) {
+            match operation_from_trigger_name(prefix, table, &trigger.name) {
+                Some(Operation::Insert) => status.insert = true,
+                Some(Operation::Update) => status.update = true,
+                Some(Operation::Delete) => status.delete = true,
+                None => {}
+            }
+        }
+
+        status
+    }
+}
+
+fn operation_from_trigger_name(prefix: &str, table: &str, trigger_name: &str) -> Option<Operation> {
+    let stem = format!("{prefix}_{table}_");
+    let suffix = trigger_name.strip_prefix(&stem)?;
+
+    match suffix {
+        "insert" => Some(Operation::Insert),
+        "update" => Some(Operation::Update),
+        "delete" => Some(Operation::Delete),
+        _ => None,
+    }
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value { "yes" } else { "no" }
 }
 
 fn print_statements(statements: &[String]) {

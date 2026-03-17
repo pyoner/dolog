@@ -3,11 +3,11 @@
 `dolog` is a Rust CLI for managing SQLite triggers that capture table changes for downstream logging.
 
 The current milestone focuses on trigger lifecycle management:
-- create triggers for a table
+- create triggers for one or more tables
 - update triggers after schema changes
 - delete triggers
-- preview generated SQL
-- list managed triggers
+- show trigger coverage status
+- write planned SQL to stdout or a file before applying it
 
 ## Status
 
@@ -58,9 +58,9 @@ sqlite3 dev.sqlite < seed.sql
 You can then run the CLI against that file:
 
 ```bash
-cargo run -p dolog -- trigger create --db /home/pyoner/repo/dolog/dev.sqlite --table users
-cargo run -p dolog -- trigger list --db /home/pyoner/repo/dolog/dev.sqlite
-cargo run -p dolog -- trigger create --db /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
+cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users
+cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite --all-tables
+cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
 ```
 
 ## Commands
@@ -68,110 +68,109 @@ cargo run -p dolog -- trigger create --db /home/pyoner/repo/dolog/dev.sqlite --t
 Create triggers for a table:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users
 ```
 
 Create triggers only for specific operations:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --operation insert
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --operation insert --operation update
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --operation insert
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --operation insert --operation update
 ```
 
 Create triggers for multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts
 ```
 
 Create triggers for all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables
+cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables
 ```
 
 Update triggers after a schema change:
 
 ```bash
-cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger update /path/to/app.sqlite --table users
 ```
 
 Update only specific operations after a schema change:
 
 ```bash
-cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --operation insert
+cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --operation insert
 ```
 
 Delete triggers for a table:
 
 ```bash
-cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users
+```
+
+Delete only specific operations:
+
+```bash
+cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --operation delete
 ```
 
 Preview SQL without modifying the database:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --dry-run
-cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --dry-run
-cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users --dry-run
-```
-
-Preview only selected operations:
-
-```bash
-cargo run -p dolog -- trigger preview update --db /path/to/app.sqlite --table users --operation insert
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --dry-run
+cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --dry-run
+cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --dry-run
 ```
 
 Preview multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts --dry-run
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts --dry-run
 ```
 
 Preview all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables --dry-run
+cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables --dry-run
 ```
 
 Write SQL to a file instead of applying it:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --output migrations/001_create_users_triggers.sql
-cargo run -p dolog -- trigger update --db /path/to/app.sqlite --table users --output migrations/002_update_users_triggers.sql
-cargo run -p dolog -- trigger delete --db /path/to/app.sqlite --table users --output migrations/003_delete_users_triggers.sql
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --output migrations/001_create_users_triggers.sql
+cargo run -p dolog -- trigger update /path/to/app.sqlite --table users --output migrations/002_update_users_triggers.sql
+cargo run -p dolog -- trigger delete /path/to/app.sqlite --table users --output migrations/003_delete_users_triggers.sql
 ```
 
 Write one combined SQL plan for multiple tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts --output migrations/001_create_triggers.sql
+cargo run -p dolog -- trigger create /path/to/app.sqlite --table users --table posts --output migrations/001_create_triggers.sql
 ```
 
 Write one combined SQL plan for all user tables:
 
 ```bash
-cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables --output migrations/001_create_triggers.sql
+cargo run -p dolog -- trigger create /path/to/app.sqlite --all-tables --output migrations/001_create_triggers.sql
 ```
 
-Preview explicit subcommands:
+Show trigger status:
 
 ```bash
-cargo run -p dolog -- trigger preview create --db /path/to/app.sqlite --table users
-cargo run -p dolog -- trigger preview update --db /path/to/app.sqlite --table users
-cargo run -p dolog -- trigger preview delete --db /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger status /path/to/app.sqlite --table users
+cargo run -p dolog -- trigger status /path/to/app.sqlite --all-tables
 ```
 
-List managed triggers:
+Example status output:
 
-```bash
-cargo run -p dolog -- trigger list --db /path/to/app.sqlite
-cargo run -p dolog -- trigger list --db /path/to/app.sqlite --table users
+```text
+users | insert: yes | update: yes | delete: yes
+posts | insert: yes | update: no | delete: yes
 ```
 
 ## How It Works
 
-For a target table, `dolog` generates three SQLite triggers:
+For a target table, `dolog` can generate up to three SQLite triggers:
 - `AFTER INSERT`
 - `AFTER UPDATE`
 - `AFTER DELETE`
