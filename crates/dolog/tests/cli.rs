@@ -131,6 +131,55 @@ fn create_supports_repeated_table_flags() {
 }
 
 #[test]
+fn create_all_tables_ignores_dolog_log_table() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );
+            CREATE TABLE _dolog_changes (
+                id INTEGER PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                old_values TEXT,
+                new_values TEXT,
+                changed_at TEXT NOT NULL
+            );",
+        )
+        .expect("create tables");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--all-tables",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created triggers for tables 'posts', 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let names = trigger_names(&connection);
+    assert_eq!(names.len(), 6);
+    assert!(names.iter().all(|name| !name.contains("_dolog_changes")));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn list_reports_created_triggers_from_real_sqlite_database() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
@@ -176,6 +225,55 @@ fn list_reports_created_triggers_from_real_sqlite_database() {
         .stdout(predicate::str::contains("dolog_users_delete (users)"));
 
     assert_eq!(trigger_names(&connection).len(), 3);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn preview_all_tables_ignores_dolog_log_table() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL
+            );
+            CREATE TABLE _dolog_changes (
+                id INTEGER PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                old_values TEXT,
+                new_values TEXT,
+                changed_at TEXT NOT NULL
+            );",
+        )
+        .expect("create tables");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "preview",
+            "create",
+            "--db",
+            db_path.to_str().expect("utf8 path"),
+            "--all-tables",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_users_insert\"",
+        ))
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_posts_insert\"",
+        ))
+        .stdout(predicate::str::contains("CREATE TRIGGER \"dolog__dolog_changes_").not());
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }

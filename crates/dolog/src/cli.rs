@@ -63,8 +63,14 @@ enum TriggerAction {
 struct TriggerArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long, required = true)]
+    #[arg(
+        long,
+        conflicts_with = "all_tables",
+        required_unless_present = "all_tables"
+    )]
     table: Vec<String>,
+    #[arg(long, conflicts_with = "table")]
+    all_tables: bool,
     #[arg(long, default_value = "_dolog_changes")]
     log_table: String,
     #[arg(long, default_value = "dolog")]
@@ -87,7 +93,7 @@ impl TriggerArgs {
     ) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
-        let tables = unique_tables(self.table);
+        let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
         let plan = collect_plan(&manager, &connection, &tables, planner)?;
 
         if self.dry_run {
@@ -114,17 +120,25 @@ impl TriggerArgs {
 struct ListTriggerArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long)]
+    #[arg(
+        long,
+        conflicts_with = "all_tables",
+        required_unless_present = "all_tables"
+    )]
     table: Vec<String>,
+    #[arg(long, conflicts_with = "table")]
+    all_tables: bool,
     #[arg(long, default_value = "dolog")]
     trigger_prefix: String,
+    #[arg(long, default_value = "_dolog_changes")]
+    log_table: String,
 }
 
 impl ListTriggerArgs {
     fn run(self) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
-        let manager = TriggerManager::new("_dolog_changes".to_owned(), self.trigger_prefix);
-        let tables = unique_tables(self.table);
+        let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
+        let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
         let triggers = if tables.is_empty() {
             manager.list_triggers(&connection, None)?
         } else {
@@ -184,8 +198,10 @@ enum PreviewAction {
 struct PreviewArgs {
     #[arg(long)]
     db: PathBuf,
-    #[arg(long, required = true)]
+    #[arg(long, conflicts_with = "all_tables")]
     table: Vec<String>,
+    #[arg(long, conflicts_with = "table")]
+    all_tables: bool,
     #[arg(long, default_value = "_dolog_changes")]
     log_table: String,
     #[arg(long, default_value = "dolog")]
@@ -204,7 +220,7 @@ impl PreviewArgs {
     ) -> Result<(), AppError> {
         let connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
-        let tables = unique_tables(self.table);
+        let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
         let plan = collect_plan(&manager, &connection, &tables, planner)?;
         print_statements(plan.statements());
         Ok(())
@@ -255,6 +271,19 @@ fn unique_tables(tables: Vec<String>) -> Vec<String> {
     }
 
     unique
+}
+
+fn resolve_tables(
+    manager: &TriggerManager,
+    connection: &rusqlite::Connection,
+    tables: Vec<String>,
+    all_tables: bool,
+) -> Result<Vec<String>, AppError> {
+    if all_tables {
+        return manager.list_target_tables(connection);
+    }
+
+    Ok(unique_tables(tables))
 }
 
 fn format_table_targets(tables: &[String]) -> String {

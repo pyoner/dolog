@@ -77,6 +77,12 @@ Create triggers for multiple tables:
 cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts
 ```
 
+Create triggers for all user tables:
+
+```bash
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables
+```
+
 Update triggers after a schema change:
 
 ```bash
@@ -103,6 +109,12 @@ Preview multiple tables:
 cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts --dry-run
 ```
 
+Preview all user tables:
+
+```bash
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables --dry-run
+```
+
 Write SQL to a file instead of applying it:
 
 ```bash
@@ -115,6 +127,12 @@ Write one combined SQL plan for multiple tables:
 
 ```bash
 cargo run -p dolog -- trigger create --db /path/to/app.sqlite --table users --table posts --output migrations/001_create_triggers.sql
+```
+
+Write one combined SQL plan for all user tables:
+
+```bash
+cargo run -p dolog -- trigger create --db /path/to/app.sqlite --all-tables --output migrations/001_create_triggers.sql
 ```
 
 Preview explicit subcommands:
@@ -166,5 +184,6 @@ The test suite includes:
 - The log table defaults to `_dolog_changes`.
 - The trigger prefix defaults to `dolog`.
 - `--table` can be repeated to target multiple tables in one command.
+- `--all-tables` targets all non-SQLite tables except the dolog log table.
 - `--dry-run` prints the SQL plan to stdout.
 - `--output <FILE>` writes the SQL plan to a file instead of applying it.

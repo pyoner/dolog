@@ -139,6 +139,20 @@ impl TriggerManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
+    pub fn list_target_tables(&self, connection: &Connection) -> Result<Vec<String>, AppError> {
+        let mut statement = connection.prepare(
+            "SELECT name
+             FROM sqlite_master
+             WHERE type = 'table'
+               AND name NOT LIKE 'sqlite_%'
+               AND name != ?1
+             ORDER BY name",
+        )?;
+
+        let rows = statement.query_map([self.log_table.as_str()], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
     pub fn apply_plan(
         &self,
         connection: &mut Connection,
