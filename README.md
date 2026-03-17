@@ -48,7 +48,7 @@ cargo build -p dolog
 
 ## Example Database
 
-This repo includes a simple example seed file at [`seed.sql`](/home/pyoner/repo/dolog/seed.sql).
+This repo includes a simple example seed file at `seed.sql`.
 
 Create a local example database:
 
@@ -59,11 +59,13 @@ sqlite3 dev.sqlite < seed.sql
 You can then run the CLI against that file:
 
 ```bash
-cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users
-cargo run -p dolog -- trigger status /home/pyoner/repo/dolog/dev.sqlite
-cargo run -p dolog -- log status /home/pyoner/repo/dolog/dev.sqlite
-cargo run -p dolog -- trigger create /home/pyoner/repo/dolog/dev.sqlite --table users --dry-run
-cargo run -p dolog -- log export /home/pyoner/repo/dolog/dev.sqlite --output /home/pyoner/repo/dolog/changes.jsonl
+cargo run -p dolog -- trigger create dev.sqlite --table users
+cargo run -p dolog -- trigger create dev.sqlite --table users
+cargo run -p dolog -- trigger status dev.sqlite
+cargo run -p dolog -- log status dev.sqlite
+cargo run -p dolog -- trigger create dev.sqlite --table users --dry-run
+cargo run -p dolog -- log export dev.sqlite --dry-run
+cargo run -p dolog -- log export dev.sqlite changes.jsonl
 ```
 
 ## Commands
@@ -178,13 +180,19 @@ Export captured logs to JSON Lines:
 
 ```bash
 cargo run -p dolog -- log status /path/to/app.sqlite
-cargo run -p dolog -- log export /path/to/app.sqlite --output /path/to/changes.jsonl
+cargo run -p dolog -- log export /path/to/app.sqlite /path/to/changes.jsonl
 ```
 
 Export only the next batch:
 
 ```bash
-cargo run -p dolog -- log export /path/to/app.sqlite --output /path/to/changes.jsonl --limit 100
+cargo run -p dolog -- log export /path/to/app.sqlite /path/to/changes.jsonl --limit 100
+```
+
+Dry run without writing or deleting:
+
+```bash
+cargo run -p dolog -- log export /path/to/app.sqlite --dry-run
 ```
 
 ## How It Works
@@ -252,4 +260,5 @@ The test suite includes:
 - `trigger status` defaults to all user tables when no table selector is provided.
 - `--dry-run` prints the SQL plan to stdout.
 - `--output <FILE>` writes the SQL plan to a file instead of applying it.
-- `log export` appends exported rows to the output file and removes those rows from `_dolog_changes`.
+- `log export <db> <output-file>` appends exported rows to the output file and removes those rows from `_dolog_changes`.
+- `log export <db> --dry-run` shows what would be exported without writing or deleting rows.
