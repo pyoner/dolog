@@ -457,7 +457,6 @@ fn log_export_writes_jsonl_and_deletes_exported_rows() {
             "log",
             "export",
             db_path.to_str().expect("utf8 path"),
-            "--output",
             output_path.to_str().expect("utf8 path"),
         ])
         .assert()
@@ -477,6 +476,60 @@ fn log_export_writes_jsonl_and_deletes_exported_rows() {
 
     std::fs::remove_file(db_path).expect("remove temp db");
     std::fs::remove_file(output_path).expect("remove temp export");
+}
+
+#[test]
+fn log_export_dry_run_does_not_require_output_or_delete_rows() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "create",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    connection
+        .execute("INSERT INTO users (email) VALUES (?1)", ["ada@example.com"])
+        .expect("insert user");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            db_path.to_str().expect("utf8 path"),
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Dry run for"))
+        .stdout(predicate::str::contains("Would export 1 change rows."));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let remaining: i64 = connection
+        .query_row("SELECT COUNT(*) FROM _dolog_changes", [], |row| row.get(0))
+        .expect("count remaining logs");
+    assert_eq!(remaining, 1);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
 }
 
 #[test]

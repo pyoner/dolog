@@ -52,23 +52,35 @@ enum LogAction {
 #[derive(Debug, Args)]
 struct LogExportArgs {
     db: PathBuf,
-    #[arg(long, value_name = "FILE")]
-    output: PathBuf,
+    #[arg(conflicts_with = "dry_run")]
+    output: Option<PathBuf>,
     #[arg(long, default_value = "_dolog_changes")]
     log_table: String,
     #[arg(long)]
     limit: Option<usize>,
+    #[arg(long, conflicts_with = "output")]
+    dry_run: bool,
 }
 
 impl LogExportArgs {
     fn run(self) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
-        let result = export_logs(&mut connection, &self.log_table, &self.output, self.limit)?;
+        if self.dry_run {
+            let rows = log_status(&connection, &self.log_table)?;
+            let total = rows.iter().map(|row| row.count).sum::<i64>();
+            println!("Dry run for {}", self.db.display());
+            println!();
+            println!("Would export {total} change rows.");
+            return Ok(());
+        }
+
+        let output = self.output.ok_or_else(|| AppError::MissingExportOutput)?;
+        let result = export_logs(&mut connection, &self.log_table, &output, self.limit)?;
 
         println!(
             "Exported {} change rows to '{}'.",
             result.exported,
-            self.output.display()
+            output.display()
         );
         Ok(())
     }

@@ -395,6 +395,8 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
+    #[error("an output file is required unless --dry-run is used")]
+    MissingExportOutput,
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("table '{0}' does not exist")]
