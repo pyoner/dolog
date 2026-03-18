@@ -1,4 +1,4 @@
 /target
-/dev.sqlite
 /migrations
+*.sqlite
 *.jsonl
