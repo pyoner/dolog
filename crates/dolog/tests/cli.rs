@@ -5,7 +5,7 @@ use predicates::prelude::*;
 use rusqlite::Connection;
 
 #[test]
-fn create_dry_run_prints_sql_without_modifying_database() {
+fn generate_prints_sql_to_stdout_without_modifying_database() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
     connection
@@ -22,11 +22,10 @@ fn create_dry_run_prints_sql_without_modifying_database() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
-            "--dry-run",
         ])
         .assert()
         .success()
@@ -35,6 +34,9 @@ fn create_dry_run_prints_sql_without_modifying_database() {
         ))
         .stdout(predicate::str::contains(
             "CREATE TRIGGER \"dolog_users_insert\"",
+        ))
+        .stdout(predicate::str::contains(
+            "DROP TRIGGER IF EXISTS \"dolog_users_insert\";",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -45,7 +47,7 @@ fn create_dry_run_prints_sql_without_modifying_database() {
 }
 
 #[test]
-fn create_supports_operation_selection() {
+fn generate_supports_operation_selection() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
     connection
@@ -62,17 +64,18 @@ fn create_supports_operation_selection() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
             "--operation",
             "insert",
+            "--apply",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Created triggers for table 'users'.",
+            "Applied trigger SQL for table 'users'.",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -85,7 +88,7 @@ fn create_supports_operation_selection() {
 }
 
 #[test]
-fn create_output_writes_sql_file_without_modifying_database() {
+fn generate_writes_sql_file_without_modifying_database() {
     let db_path = unique_db_path();
     let output_path = unique_sql_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
@@ -103,16 +106,15 @@ fn create_output_writes_sql_file_without_modifying_database() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
+            output_path.to_str().expect("utf8 path"),
             "--table",
             "users",
-            "--output",
-            output_path.to_str().expect("utf8 path"),
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Wrote SQL plan to"));
+        .stdout(predicate::str::contains("Wrote trigger SQL to"));
 
     let sql = std::fs::read_to_string(&output_path).expect("read output file");
     assert!(sql.contains("CREATE TABLE IF NOT EXISTS \"_dolog_changes\""));
@@ -127,60 +129,7 @@ fn create_output_writes_sql_file_without_modifying_database() {
 }
 
 #[test]
-fn update_only_refreshes_selected_operations() {
-    let db_path = unique_db_path();
-    let connection = Connection::open(&db_path).expect("create sqlite database");
-    connection
-        .execute_batch(
-            "CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                email TEXT NOT NULL
-            );",
-        )
-        .expect("create users table");
-    drop(connection);
-
-    Command::cargo_bin("dolog")
-        .expect("build dolog binary")
-        .args([
-            "trigger",
-            "create",
-            db_path.to_str().expect("utf8 path"),
-            "--table",
-            "users",
-        ])
-        .assert()
-        .success();
-
-    Command::cargo_bin("dolog")
-        .expect("build dolog binary")
-        .args([
-            "trigger",
-            "update",
-            db_path.to_str().expect("utf8 path"),
-            "--table",
-            "users",
-            "--operation",
-            "insert",
-        ])
-        .assert()
-        .success();
-
-    let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(
-        trigger_names(&connection),
-        vec![
-            "dolog_users_delete".to_owned(),
-            "dolog_users_insert".to_owned(),
-            "dolog_users_update".to_owned()
-        ]
-    );
-
-    std::fs::remove_file(db_path).expect("remove temp db");
-}
-
-#[test]
-fn create_supports_repeated_table_flags() {
+fn generate_supports_repeated_table_flags() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
     connection
@@ -201,17 +150,18 @@ fn create_supports_repeated_table_flags() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
             "--table",
             "posts",
+            "--apply",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Created triggers for tables 'users', 'posts'.",
+            "Applied trigger SQL for tables 'users', 'posts'.",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -221,59 +171,7 @@ fn create_supports_repeated_table_flags() {
 }
 
 #[test]
-fn delete_only_removes_selected_operations() {
-    let db_path = unique_db_path();
-    let connection = Connection::open(&db_path).expect("create sqlite database");
-    connection
-        .execute_batch(
-            "CREATE TABLE users (
-                id INTEGER PRIMARY KEY,
-                email TEXT NOT NULL
-            );",
-        )
-        .expect("create users table");
-    drop(connection);
-
-    Command::cargo_bin("dolog")
-        .expect("build dolog binary")
-        .args([
-            "trigger",
-            "create",
-            db_path.to_str().expect("utf8 path"),
-            "--table",
-            "users",
-        ])
-        .assert()
-        .success();
-
-    Command::cargo_bin("dolog")
-        .expect("build dolog binary")
-        .args([
-            "trigger",
-            "delete",
-            db_path.to_str().expect("utf8 path"),
-            "--table",
-            "users",
-            "--operation",
-            "delete",
-        ])
-        .assert()
-        .success();
-
-    let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(
-        trigger_names(&connection),
-        vec![
-            "dolog_users_insert".to_owned(),
-            "dolog_users_update".to_owned()
-        ]
-    );
-
-    std::fs::remove_file(db_path).expect("remove temp db");
-}
-
-#[test]
-fn create_all_tables_ignores_dolog_log_table() {
+fn generate_all_tables_ignores_dolog_log_table() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
     connection
@@ -302,20 +200,111 @@ fn create_all_tables_ignores_dolog_log_table() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--all-tables",
+            "--apply",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Created triggers for tables 'posts', 'users'.",
+            "Applied trigger SQL for tables 'posts', 'users'.",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
     let names = trigger_names(&connection);
     assert_eq!(names.len(), 6);
     assert!(names.iter().all(|name| !name.contains("_dolog_changes")));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_drop_removes_selected_operations() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--drop",
+            "--operation",
+            "delete",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Applied trigger SQL for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(
+        trigger_names(&connection),
+        vec![
+            "dolog_users_insert".to_owned(),
+            "dolog_users_update".to_owned()
+        ]
+    );
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_rejects_sql_file_with_apply() {
+    let db_path = unique_db_path();
+    let output_path = unique_sql_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            output_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .failure();
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -338,7 +327,7 @@ fn status_reports_operation_coverage() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -346,6 +335,7 @@ fn status_reports_operation_coverage() {
             "insert",
             "--operation",
             "delete",
+            "--apply",
         ])
         .assert()
         .success();
@@ -390,12 +380,13 @@ fn status_defaults_to_all_tables_without_flags() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
             "--operation",
             "insert",
+            "--apply",
         ])
         .assert()
         .success();
@@ -431,10 +422,11 @@ fn log_export_writes_jsonl_and_deletes_exported_rows() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
+            "--apply",
         ])
         .assert()
         .success();
@@ -496,10 +488,11 @@ fn log_export_dry_run_does_not_require_output_or_delete_rows() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
+            "--apply",
         ])
         .assert()
         .success();
@@ -550,10 +543,11 @@ fn log_status_reports_pending_rows_by_table_and_operation() {
         .expect("build dolog binary")
         .args([
             "trigger",
-            "create",
+            "generate",
             db_path.to_str().expect("utf8 path"),
             "--table",
             "users",
+            "--apply",
         ])
         .assert()
         .success();

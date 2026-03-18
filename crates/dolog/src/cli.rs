@@ -73,7 +73,7 @@ impl LogExportArgs {
             return Ok(());
         }
 
-        let output = self.output.ok_or_else(|| AppError::MissingExportOutput)?;
+        let output = self.output.ok_or(AppError::MissingExportOutput)?;
         let result = export_logs(&mut connection, &self.log_table, &output, self.limit)?;
 
         println!(
@@ -116,24 +116,7 @@ struct TriggerCommand {
 impl TriggerCommand {
     fn run(self) -> Result<(), AppError> {
         match self.action {
-            TriggerAction::Create(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_create(connection, table, operations)
-                },
-                "Created",
-            ),
-            TriggerAction::Update(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_update(connection, table, operations)
-                },
-                "Updated",
-            ),
-            TriggerAction::Delete(args) => args.run(
-                |manager, connection, table, operations| {
-                    manager.plan_delete(connection, table, operations)
-                },
-                "Deleted",
-            ),
+            TriggerAction::Generate(args) => args.run(),
             TriggerAction::Status(args) => args.run(),
         }
     }
@@ -141,15 +124,17 @@ impl TriggerCommand {
 
 #[derive(Debug, Subcommand)]
 enum TriggerAction {
-    Create(TriggerArgs),
-    Update(TriggerArgs),
-    Delete(TriggerArgs),
+    Generate(TriggerGenerateArgs),
     Status(StatusArgs),
 }
 
 #[derive(Debug, Args)]
-struct TriggerArgs {
+struct TriggerGenerateArgs {
     db: PathBuf,
+    #[arg(conflicts_with = "apply")]
+    sql_file: Option<PathBuf>,
+    #[arg(long)]
+    drop: bool,
     #[arg(
         long,
         conflicts_with = "all_tables",
@@ -164,45 +149,51 @@ struct TriggerArgs {
     trigger_prefix: String,
     #[arg(long, value_enum)]
     operation: Vec<OperationArg>,
-    #[arg(long, conflicts_with = "output")]
-    dry_run: bool,
-    #[arg(long, value_name = "FILE", conflicts_with = "dry_run")]
-    output: Option<PathBuf>,
+    #[arg(long, conflicts_with = "sql_file")]
+    apply: bool,
 }
 
-impl TriggerArgs {
-    fn run(
-        self,
-        planner: impl Fn(
-            &TriggerManager,
-            &rusqlite::Connection,
-            &str,
-            &[Operation],
-        ) -> Result<ExecutionPlan, AppError>,
-        success_verb: &str,
-    ) -> Result<(), AppError> {
+impl TriggerGenerateArgs {
+    fn run(self) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
         let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
         let operations = resolve_operations(self.operation);
-        let plan = collect_plan(&manager, &connection, &tables, &operations, planner)?;
+        let plan = if self.drop {
+            collect_plan(
+                &manager,
+                &connection,
+                &tables,
+                &operations,
+                |manager, connection, table, operations| {
+                    manager.plan_delete(connection, table, operations)
+                },
+            )?
+        } else {
+            collect_plan(
+                &manager,
+                &connection,
+                &tables,
+                &operations,
+                |manager, connection, table, operations| {
+                    manager.plan_update(connection, table, operations)
+                },
+            )?
+        };
 
-        if self.dry_run {
-            print_statements(plan.statements());
+        if self.apply {
+            manager.apply_plan(&mut connection, &plan)?;
+            println!("Applied trigger SQL for {}.", format_table_targets(&tables));
             return Ok(());
         }
 
-        if let Some(output_path) = self.output {
-            write_plan(&output_path, &plan)?;
-            println!("Wrote SQL plan to '{}'.", output_path.display());
+        if let Some(path) = self.sql_file {
+            write_plan(&path, &plan)?;
+            println!("Wrote trigger SQL to '{}'.", path.display());
             return Ok(());
         }
 
-        manager.apply_plan(&mut connection, &plan)?;
-        println!(
-            "{success_verb} triggers for {}.",
-            format_table_targets(&tables)
-        );
+        print_statements(plan.statements());
         Ok(())
     }
 }
