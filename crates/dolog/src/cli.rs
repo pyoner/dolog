@@ -9,7 +9,10 @@ use crate::trigger::{
 
 #[derive(Debug, Parser)]
 #[command(name = "dolog")]
-#[command(about = "Manage SQLite triggers for change logging")]
+#[command(
+    about = "Manage SQLite change capture and log export",
+    long_about = "Manage SQLite trigger generation, trigger status, pending log status, and JSONL log export."
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -24,7 +27,15 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    #[command(
+        about = "Inspect and export captured change rows",
+        long_about = "Inspect pending rows in the dolog log table and export those rows as JSON Lines."
+    )]
     Log(LogCommand),
+    #[command(
+        about = "Generate trigger SQL and inspect trigger coverage",
+        long_about = "Generate SQLite trigger SQL for one or more tables, optionally apply it directly, and inspect trigger coverage."
+    )]
     Trigger(TriggerCommand),
 }
 
@@ -45,20 +56,42 @@ impl LogCommand {
 
 #[derive(Debug, Subcommand)]
 enum LogAction {
+    #[command(
+        about = "Export pending change rows as JSON Lines",
+        long_about = "Export rows from the dolog log table as JSON Lines. In normal mode, the command appends rows to an output file and then removes those rows from the database. In dry-run mode, it writes the same JSONL rows to stdout and does not delete them.",
+        after_help = "Examples:\n  dolog log export db.sqlite changes.jsonl\n  dolog log export db.sqlite changes.jsonl --limit 100\n  dolog log export db.sqlite --dry-run"
+    )]
     Export(LogExportArgs),
+    #[command(
+        about = "Show pending log rows grouped by table and operation",
+        long_about = "Show the pending rows currently stored in the dolog log table, grouped by source table and operation. This command only reads from the database.",
+        after_help = "Example:\n  dolog log status db.sqlite"
+    )]
     Status(LogStatusArgs),
 }
 
 #[derive(Debug, Args)]
 struct LogExportArgs {
+    #[arg(help = "SQLite database file to read pending change rows from")]
     db: PathBuf,
-    #[arg(conflicts_with = "dry_run")]
+    #[arg(
+        conflicts_with = "dry_run",
+        help = "Write exported JSONL rows to this file"
+    )]
     output: Option<PathBuf>,
-    #[arg(long, default_value = "_dolog_changes")]
+    #[arg(
+        long,
+        default_value = "_dolog_changes",
+        help = "Name of the dolog log table"
+    )]
     log_table: String,
-    #[arg(long)]
+    #[arg(long, help = "Export at most this many rows")]
     limit: Option<usize>,
-    #[arg(long, conflicts_with = "output")]
+    #[arg(
+        long,
+        conflicts_with = "output",
+        help = "Write JSONL rows to stdout without deleting them from the database"
+    )]
     dry_run: bool,
 }
 
@@ -87,8 +120,13 @@ impl LogExportArgs {
 
 #[derive(Debug, Args)]
 struct LogStatusArgs {
+    #[arg(help = "SQLite database file to inspect")]
     db: PathBuf,
-    #[arg(long, default_value = "_dolog_changes")]
+    #[arg(
+        long,
+        default_value = "_dolog_changes",
+        help = "Name of the dolog log table"
+    )]
     log_table: String,
 }
 
@@ -124,32 +162,70 @@ impl TriggerCommand {
 
 #[derive(Debug, Subcommand)]
 enum TriggerAction {
+    #[command(
+        about = "Generate trigger SQL for one or more tables",
+        long_about = "Generate SQLite trigger SQL for the selected tables and operations. By default the SQL is written to stdout. Provide a SQL file path to write a migration artifact, or use --apply to execute the generated SQL directly against the database. Use --drop to generate trigger-removal SQL instead of create-or-refresh SQL.",
+        after_help = "Examples:\n  dolog trigger generate db.sqlite --table users\n  dolog trigger generate db.sqlite 001_users_triggers.sql --table users\n  dolog trigger generate db.sqlite --table users --apply\n  dolog trigger generate db.sqlite --drop --table users"
+    )]
     Generate(TriggerGenerateArgs),
+    #[command(
+        about = "Show trigger coverage for one or more tables",
+        long_about = "Show whether dolog-managed INSERT, UPDATE, and DELETE triggers are present for each selected table. When --table is omitted, status is shown for all user tables except the dolog log table.",
+        after_help = "Examples:\n  dolog trigger status db.sqlite\n  dolog trigger status db.sqlite --table users"
+    )]
     Status(StatusArgs),
 }
 
 #[derive(Debug, Args)]
 struct TriggerGenerateArgs {
+    #[arg(help = "SQLite database file to inspect or modify")]
     db: PathBuf,
-    #[arg(conflicts_with = "apply")]
+    #[arg(
+        conflicts_with = "apply",
+        help = "Write generated SQL to this file instead of stdout"
+    )]
     sql_file: Option<PathBuf>,
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Generate DROP TRIGGER statements instead of create-or-refresh SQL"
+    )]
     drop: bool,
     #[arg(
         long,
         conflicts_with = "all_tables",
-        required_unless_present = "all_tables"
+        required_unless_present = "all_tables",
+        help = "Target a specific table; repeat to target multiple tables"
     )]
     table: Vec<String>,
-    #[arg(long, conflicts_with = "table")]
+    #[arg(
+        long,
+        conflicts_with = "table",
+        help = "Target all user tables except the dolog log table"
+    )]
     all_tables: bool,
-    #[arg(long, default_value = "_dolog_changes")]
+    #[arg(
+        long,
+        default_value = "_dolog_changes",
+        help = "Name of the dolog log table"
+    )]
     log_table: String,
-    #[arg(long, default_value = "dolog")]
+    #[arg(
+        long,
+        default_value = "dolog",
+        help = "Prefix used for managed trigger names"
+    )]
     trigger_prefix: String,
-    #[arg(long, value_enum)]
+    #[arg(
+        long,
+        value_enum,
+        help = "Limit generation to specific operations; defaults to insert, update, and delete"
+    )]
     operation: Vec<OperationArg>,
-    #[arg(long, conflicts_with = "sql_file")]
+    #[arg(
+        long,
+        conflicts_with = "sql_file",
+        help = "Apply the generated SQL directly to the database"
+    )]
     apply: bool,
 }
 
@@ -200,12 +276,22 @@ impl TriggerGenerateArgs {
 
 #[derive(Debug, Args)]
 struct StatusArgs {
+    #[arg(help = "SQLite database file to inspect")]
     db: PathBuf,
+    #[arg(help = "Show status for a specific table; repeat to check multiple tables")]
     #[arg(long)]
     table: Vec<String>,
-    #[arg(long, default_value = "dolog")]
+    #[arg(
+        long,
+        default_value = "dolog",
+        help = "Prefix used for managed trigger names"
+    )]
     trigger_prefix: String,
-    #[arg(long, default_value = "_dolog_changes")]
+    #[arg(
+        long,
+        default_value = "_dolog_changes",
+        help = "Name of the dolog log table"
+    )]
     log_table: String,
 }
 

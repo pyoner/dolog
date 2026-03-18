@@ -5,6 +5,106 @@ use predicates::prelude::*;
 use rusqlite::Connection;
 
 #[test]
+fn top_level_help_describes_trigger_and_log_commands() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Manage SQLite trigger generation, trigger status, pending log status, and JSONL log export.",
+        ))
+        .stdout(predicate::str::contains(
+            "Generate trigger SQL and inspect trigger coverage",
+        ))
+        .stdout(predicate::str::contains(
+            "Inspect and export captured change rows",
+        ));
+}
+
+#[test]
+fn trigger_generate_help_includes_notes_and_examples() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["trigger", "generate", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Generate SQLite trigger SQL for the selected tables and operations.",
+        ))
+        .stdout(predicate::str::contains(
+            "By default the SQL is written to stdout.",
+        ))
+        .stdout(predicate::str::contains(
+            "Target all user tables except the dolog log table",
+        ))
+        .stdout(predicate::str::contains(
+            "Generate DROP TRIGGER statements instead of create-or-refresh SQL",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog trigger generate db.sqlite --table users",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog trigger generate db.sqlite --drop --table users",
+        ));
+}
+
+#[test]
+fn trigger_status_help_describes_default_scope() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["trigger", "status", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Show whether dolog-managed INSERT, UPDATE, and DELETE triggers are present",
+        ))
+        .stdout(predicate::str::contains(
+            "When --table is omitted, status is shown for all user tables",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog trigger status db.sqlite --table users",
+        ));
+}
+
+#[test]
+fn log_export_help_describes_dry_run_and_output_modes() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["log", "export", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Export rows from the dolog log table as JSON Lines.",
+        ))
+        .stdout(predicate::str::contains(
+            "In dry-run mode, it writes the same JSONL rows to stdout and does not delete them.",
+        ))
+        .stdout(predicate::str::contains(
+            "Write exported JSONL rows to this file",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog log export db.sqlite --dry-run",
+        ));
+}
+
+#[test]
+fn log_status_help_describes_read_only_status() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["log", "status", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Show the pending rows currently stored in the dolog log table",
+        ))
+        .stdout(predicate::str::contains(
+            "This command only reads from the database.",
+        ))
+        .stdout(predicate::str::contains("dolog log status db.sqlite"));
+}
+
+#[test]
 fn generate_prints_sql_to_stdout_without_modifying_database() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
