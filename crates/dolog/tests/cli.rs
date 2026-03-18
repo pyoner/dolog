@@ -520,8 +520,8 @@ fn log_export_dry_run_does_not_require_output_or_delete_rows() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Dry run for"))
-        .stdout(predicate::str::contains("Would export 1 change rows."));
+        .stdout(predicate::str::contains("\"table_name\":\"users\""))
+        .stdout(predicate::str::contains("\"operation\":\"INSERT\""));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
     let remaining: i64 = connection

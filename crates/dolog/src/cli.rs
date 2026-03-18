@@ -2,7 +2,7 @@ use std::{collections::BTreeSet, fs, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::log_export::{export_logs, log_status};
+use crate::log_export::{export_logs, log_status, preview_logs};
 use crate::trigger::{
     AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
@@ -66,11 +66,10 @@ impl LogExportArgs {
     fn run(self) -> Result<(), AppError> {
         let mut connection = open_connection(&self.db)?;
         if self.dry_run {
-            let rows = log_status(&connection, &self.log_table)?;
-            let total = rows.iter().map(|row| row.count).sum::<i64>();
-            println!("Dry run for {}", self.db.display());
-            println!();
-            println!("Would export {total} change rows.");
+            let lines = preview_logs(&connection, &self.log_table, self.limit)?;
+            for line in lines {
+                println!("{line}");
+            }
             return Ok(());
         }
 

@@ -214,6 +214,8 @@ These triggers write rows into `_dolog_changes` with:
 
 `dolog log export` reads rows from `_dolog_changes`, appends them to a JSONL file, and then deletes the exported rows from the database.
 
+`dolog log export --dry-run` writes those same JSONL rows to stdout without removing them from the database.
+
 `dolog log status` shows pending change rows grouped by table and operation before export.
 
 Example log status output:
@@ -260,4 +262,4 @@ The test suite includes:
 - `--dry-run` prints the SQL plan to stdout.
 - `--output <FILE>` writes the SQL plan to a file instead of applying it.
 - `log export <db> <output-file>` appends exported rows to the output file and removes those rows from `_dolog_changes`.
-- `log export <db> --dry-run` shows what would be exported without writing or deleting rows.
+- `log export <db> --dry-run` writes the export rows to stdout in JSONL format without deleting them.

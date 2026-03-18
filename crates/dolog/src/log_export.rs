@@ -30,6 +30,19 @@ pub fn export_logs(
     })
 }
 
+pub fn preview_logs(
+    connection: &Connection,
+    log_table: &str,
+    limit: Option<usize>,
+) -> Result<Vec<String>, AppError> {
+    let entries = read_entries(connection, log_table, limit)?;
+    entries
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExportResult {
     pub exported: usize,
