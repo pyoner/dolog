@@ -77,10 +77,17 @@ By default it generates SQL to stdout:
 cargo run -p dolog -- trigger generate db.sqlite --table users
 ```
 
+Generate SQL from ordered migration files without opening a real database:
+
+```bash
+cargo run -p dolog -- trigger generate --from-migration migrations --table users
+```
+
 Write SQL to a file for migrations:
 
 ```bash
 cargo run -p dolog -- trigger generate db.sqlite 001_users_triggers.sql --table users
+cargo run -p dolog -- trigger generate --from-migration migrations 001_users_triggers.sql --all-tables
 ```
 
 Apply the generated SQL directly:
@@ -227,7 +234,9 @@ The test suite includes:
 - `--drop` switches `trigger generate` into trigger-removal mode.
 - `trigger status` defaults to all user tables when no table selector is provided.
 - `trigger generate <db> [sql-file]` writes SQL to stdout by default, or to a file if a SQL path is supplied.
+- `trigger generate --from-migration <dir> [sql-file]` loads `*.sql` files from the directory in lexicographic order into an in-memory SQLite database before generating trigger SQL.
 - `trigger generate <db> --apply` executes the generated SQL directly against the database.
+- `trigger generate --from-migration <dir> --apply` is not supported because there is no target database to modify.
 - `trigger generate` does not allow a SQL file path and `--apply` together.
 - The log table defaults to `_dolog_changes`.
 - The trigger prefix defaults to `dolog`.

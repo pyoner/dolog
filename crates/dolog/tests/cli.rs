@@ -1,4 +1,8 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
@@ -36,6 +40,9 @@ fn trigger_generate_help_includes_notes_and_examples() {
             "By default the SQL is written to stdout.",
         ))
         .stdout(predicate::str::contains(
+            "Use either a live SQLite database file or --from-migration",
+        ))
+        .stdout(predicate::str::contains(
             "Target all user tables except the dolog log table",
         ))
         .stdout(predicate::str::contains(
@@ -46,6 +53,9 @@ fn trigger_generate_help_includes_notes_and_examples() {
         ))
         .stdout(predicate::str::contains(
             "dolog trigger generate db.sqlite --drop --table users",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog trigger generate --from-migration migrations --table users",
         ));
 }
 
@@ -226,6 +236,185 @@ fn generate_writes_sql_file_without_modifying_database() {
 
     std::fs::remove_file(db_path).expect("remove temp db");
     std::fs::remove_file(output_path).expect("remove temp sql");
+}
+
+#[test]
+fn generate_from_migration_prints_sql_to_stdout() {
+    let migrations_dir = unique_migration_dir();
+    write_migration(
+        &migrations_dir,
+        "001_create_users.sql",
+        "CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL
+        );",
+    );
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
+        ))
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_users_insert\"",
+        ));
+
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+}
+
+#[test]
+fn generate_from_migration_uses_lexicographic_order() {
+    let migrations_dir = unique_migration_dir();
+    write_migration(
+        &migrations_dir,
+        "001_create_users.sql",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY);",
+    );
+    write_migration(
+        &migrations_dir,
+        "002_add_email.sql",
+        "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT '';",
+    );
+
+    let assert = Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert!(stdout.contains("NEW.\"email\""));
+
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+}
+
+#[test]
+fn generate_from_migration_rejects_apply() {
+    let migrations_dir = unique_migration_dir();
+    write_migration(
+        &migrations_dir,
+        "001_create_users.sql",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);",
+    );
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--apply is not supported with --from-migration",
+        ));
+
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+}
+
+#[test]
+fn generate_from_migration_requires_sql_files() {
+    let migrations_dir = unique_migration_dir();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no .sql migration files found"));
+
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+}
+
+#[test]
+fn generate_from_migration_reports_failing_file() {
+    let migrations_dir = unique_migration_dir();
+    write_migration(&migrations_dir, "001_bad.sql", "CREATE TABLE users (id INTEGER");
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("001_bad.sql"));
+
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+}
+
+#[test]
+fn generate_requires_exactly_one_schema_source() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["trigger", "generate", "--table", "users"])
+        .assert()
+        .failure();
+
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);")
+        .expect("create users table");
+    drop(connection);
+
+    let migrations_dir = unique_migration_dir();
+    write_migration(
+        &migrations_dir,
+        "001_create_users.sql",
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);",
+    );
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--from-migration",
+            migrations_dir.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .failure();
+
+    fs::remove_file(db_path).expect("remove temp db");
+    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
 }
 
 #[test]
@@ -731,4 +920,18 @@ fn unique_jsonl_path() -> std::path::PathBuf {
         .as_nanos();
 
     std::env::temp_dir().join(format!("dolog_cli_test_{nanos}.jsonl"))
+}
+
+fn unique_migration_dir() -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("dolog_cli_migrations_{nanos}"));
+    fs::create_dir_all(&path).expect("create migration directory");
+    path
+}
+
+fn write_migration(dir: &Path, name: &str, contents: &str) {
+    fs::write(dir.join(name), contents).expect("write migration file");
 }

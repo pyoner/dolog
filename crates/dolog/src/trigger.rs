@@ -395,6 +395,30 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
+    #[error("exactly one schema source must be provided: either <db> or --from-migration <dir>")]
+    InvalidSchemaSource,
+    #[error("failed to read migration directory '{path}': {source}")]
+    ReadMigrationDirectory {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("no .sql migration files found in '{path}'")]
+    NoMigrationFiles { path: String },
+    #[error("failed to read migration file '{path}': {source}")]
+    ReadMigrationFile {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to apply migration file '{path}': {source}")]
+    ApplyMigration {
+        path: String,
+        #[source]
+        source: rusqlite::Error,
+    },
+    #[error("--apply is not supported with --from-migration because there is no target database to modify")]
+    ApplyUnsupportedWithMigrationSource,
     #[error("an output file is required unless --dry-run is used")]
     MissingExportOutput,
     #[error(transparent)]
