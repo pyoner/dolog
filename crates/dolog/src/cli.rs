@@ -192,8 +192,8 @@ impl TriggerCommand {
 enum TriggerAction {
     #[command(
         about = "Generate trigger SQL for one or more tables",
-        long_about = "Generate SQLite trigger SQL for the selected tables and operations. By default the SQL is written to stdout. Provide a SQL file path to write a migration artifact, or use --apply to execute the generated SQL directly against the database. Use --drop to generate trigger-removal SQL instead of create-or-refresh SQL. Use either a live SQLite database file or --from-migration to build an in-memory SQLite schema from ordered .sql migration files.",
-        after_help = "Examples:\n  dolog trigger generate db.sqlite --table users\n  dolog trigger generate db.sqlite 001_users_triggers.sql --table users\n  dolog trigger generate db.sqlite --table users --apply\n  dolog trigger generate db.sqlite --drop --table users\n  dolog trigger generate --from-migration migrations --table users\n  dolog trigger generate --from-migration migrations 001_users_triggers.sql --all-tables"
+        long_about = "Generate SQLite trigger SQL for the selected tables and operations. By default the SQL is written to stdout. Provide a SQL file path to write a migration artifact, or use --apply to execute the generated SQL directly against the database. Use --drop to generate trigger-removal SQL instead of create-or-refresh SQL. The schema source path may be an existing SQLite database file, a directory of ordered .sql migration files, or a single .sql schema script loaded into in-memory SQLite.",
+        after_help = "Examples:\n  dolog trigger generate db.sqlite --table users\n  dolog trigger generate db.sqlite 001_users_triggers.sql --table users\n  dolog trigger generate db.sqlite --table users --apply\n  dolog trigger generate db.sqlite --drop --table users\n  dolog trigger generate migrations --table users\n  dolog trigger generate schema.sql 001_users_triggers.sql --all-tables"
     )]
     Generate(TriggerGenerateArgs),
     #[command(
@@ -206,25 +206,13 @@ enum TriggerAction {
 
 #[derive(Debug, Args)]
 struct TriggerGenerateArgs {
-    #[arg(
-        help = "SQLite database file to inspect or modify",
-        required_unless_present = "from_migration",
-        conflicts_with = "from_migration"
-    )]
-    db: Option<PathBuf>,
+    #[arg(help = "Schema source path: SQLite db file, migration directory, or .sql schema script")]
+    schema_source: PathBuf,
     #[arg(
         conflicts_with = "apply",
         help = "Write generated SQL to this file instead of stdout"
     )]
     sql_file: Option<PathBuf>,
-    #[arg(
-        long,
-        value_name = "DIR",
-        required_unless_present = "db",
-        conflicts_with = "db",
-        help = "Load ordered .sql migration files from this directory into an in-memory SQLite schema"
-    )]
-    from_migration: Option<PathBuf>,
     #[arg(
         long,
         help = "Generate DROP TRIGGER statements instead of create-or-refresh SQL"
@@ -271,9 +259,9 @@ struct TriggerGenerateArgs {
 
 impl TriggerGenerateArgs {
     fn run(self) -> Result<(), AppError> {
-        let source = SchemaSource::from_args(self.db, self.from_migration)?;
-        if self.apply && matches!(source, SchemaSource::MigrationDir(_)) {
-            return Err(AppError::ApplyUnsupportedWithMigrationSource);
+        let source = SchemaSource::from_path(self.schema_source)?;
+        if self.apply && !matches!(source, SchemaSource::Database(_)) {
+            return Err(AppError::ApplyUnsupportedWithSchemaSource);
         }
 
         let mut connection = source.open_connection()?;
@@ -322,21 +310,38 @@ impl TriggerGenerateArgs {
 enum SchemaSource {
     Database(PathBuf),
     MigrationDir(PathBuf),
+    SqlFile(PathBuf),
 }
 
 impl SchemaSource {
-    fn from_args(db: Option<PathBuf>, from_migration: Option<PathBuf>) -> Result<Self, AppError> {
-        match (db, from_migration) {
-            (Some(db), None) => Ok(Self::Database(db)),
-            (None, Some(dir)) => Ok(Self::MigrationDir(dir)),
-            _ => Err(AppError::InvalidSchemaSource),
+    fn from_path(path: PathBuf) -> Result<Self, AppError> {
+        let metadata = fs::metadata(&path).map_err(|source| AppError::ReadSchemaSource {
+            path: path.display().to_string(),
+            source,
+        })?;
+
+        if metadata.is_dir() {
+            return Ok(Self::MigrationDir(path));
         }
+
+        if metadata.is_file() && path.extension().is_some_and(|extension| extension == "sql") {
+            return Ok(Self::SqlFile(path));
+        }
+
+        if metadata.is_file() {
+            return Ok(Self::Database(path));
+        }
+
+        Err(AppError::UnsupportedSchemaSource {
+            path: path.display().to_string(),
+        })
     }
 
     fn open_connection(&self) -> Result<Connection, AppError> {
         match self {
             Self::Database(path) => open_connection(path),
             Self::MigrationDir(dir) => open_migration_connection(dir),
+            Self::SqlFile(path) => open_sql_file_connection(path),
         }
     }
 }
@@ -540,6 +545,21 @@ fn open_migration_connection(dir: &Path) -> Result<Connection, AppError> {
             })?;
     }
 
+    Ok(connection)
+}
+
+fn open_sql_file_connection(path: &Path) -> Result<Connection, AppError> {
+    let sql = fs::read_to_string(path).map_err(|source| AppError::ReadMigrationFile {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let connection = Connection::open_in_memory()?;
+    connection
+        .execute_batch(&sql)
+        .map_err(|source| AppError::ApplyMigration {
+            path: path.display().to_string(),
+            source,
+        })?;
     Ok(connection)
 }
 

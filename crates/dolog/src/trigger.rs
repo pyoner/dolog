@@ -1,10 +1,14 @@
 use std::path::Path;
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
 
 pub fn open_connection(path: &Path) -> Result<Connection, AppError> {
-    Connection::open(path).map_err(|source| AppError::OpenDatabase {
+    Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|source| AppError::OpenDatabase {
         path: path.display().to_string(),
         source,
     })
@@ -395,8 +399,14 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
-    #[error("exactly one schema source must be provided: either <db> or --from-migration <dir>")]
-    InvalidSchemaSource,
+    #[error("failed to read schema source '{path}': {source}")]
+    ReadSchemaSource {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("unsupported schema source at '{path}'; expected a SQLite database file, a directory, or a .sql file")]
+    UnsupportedSchemaSource { path: String },
     #[error("failed to read migration directory '{path}': {source}")]
     ReadMigrationDirectory {
         path: String,
@@ -417,10 +427,8 @@ pub enum AppError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error(
-        "--apply is not supported with --from-migration because there is no target database to modify"
-    )]
-    ApplyUnsupportedWithMigrationSource,
+    #[error("--apply is only supported when the schema source path is a real SQLite database file")]
+    ApplyUnsupportedWithSchemaSource,
     #[error("an output file is required unless --dry-run is used")]
     MissingExportOutput,
     #[error(transparent)]

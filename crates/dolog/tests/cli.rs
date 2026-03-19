@@ -40,7 +40,7 @@ fn trigger_generate_help_includes_notes_and_examples() {
             "By default the SQL is written to stdout.",
         ))
         .stdout(predicate::str::contains(
-            "Use either a live SQLite database file or --from-migration",
+            "The schema source path may be an existing SQLite database file",
         ))
         .stdout(predicate::str::contains(
             "Target all user tables except the dolog log table",
@@ -55,7 +55,10 @@ fn trigger_generate_help_includes_notes_and_examples() {
             "dolog trigger generate db.sqlite --drop --table users",
         ))
         .stdout(predicate::str::contains(
-            "dolog trigger generate --from-migration migrations --table users",
+            "dolog trigger generate migrations --table users",
+        ))
+        .stdout(predicate::str::contains(
+            "dolog trigger generate schema.sql 001_users_triggers.sql --all-tables",
         ));
 }
 
@@ -304,7 +307,7 @@ fn generate_writes_sql_file_without_modifying_database() {
 }
 
 #[test]
-fn generate_from_migration_prints_sql_to_stdout() {
+fn generate_from_directory_prints_sql_to_stdout() {
     let migrations_dir = unique_migration_dir();
     write_migration(
         &migrations_dir,
@@ -320,7 +323,6 @@ fn generate_from_migration_prints_sql_to_stdout() {
         .args([
             "trigger",
             "generate",
-            "--from-migration",
             migrations_dir.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -338,7 +340,7 @@ fn generate_from_migration_prints_sql_to_stdout() {
 }
 
 #[test]
-fn generate_from_migration_uses_lexicographic_order() {
+fn generate_from_directory_uses_lexicographic_order() {
     let migrations_dir = unique_migration_dir();
     write_migration(
         &migrations_dir,
@@ -356,7 +358,6 @@ fn generate_from_migration_uses_lexicographic_order() {
         .args([
             "trigger",
             "generate",
-            "--from-migration",
             migrations_dir.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -371,7 +372,7 @@ fn generate_from_migration_uses_lexicographic_order() {
 }
 
 #[test]
-fn generate_from_migration_rejects_apply() {
+fn generate_from_directory_rejects_apply() {
     let migrations_dir = unique_migration_dir();
     write_migration(
         &migrations_dir,
@@ -384,7 +385,6 @@ fn generate_from_migration_rejects_apply() {
         .args([
             "trigger",
             "generate",
-            "--from-migration",
             migrations_dir.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -393,14 +393,14 @@ fn generate_from_migration_rejects_apply() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            "--apply is not supported with --from-migration",
+            "--apply is only supported when the schema source path is a real SQLite database file",
         ));
 
     fs::remove_dir_all(migrations_dir).expect("remove migration directory");
 }
 
 #[test]
-fn generate_from_migration_requires_sql_files() {
+fn generate_from_directory_requires_sql_files() {
     let migrations_dir = unique_migration_dir();
 
     Command::cargo_bin("dolog")
@@ -408,7 +408,6 @@ fn generate_from_migration_requires_sql_files() {
         .args([
             "trigger",
             "generate",
-            "--from-migration",
             migrations_dir.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -421,7 +420,7 @@ fn generate_from_migration_requires_sql_files() {
 }
 
 #[test]
-fn generate_from_migration_reports_failing_file() {
+fn generate_from_directory_reports_failing_file() {
     let migrations_dir = unique_migration_dir();
     write_migration(
         &migrations_dir,
@@ -434,7 +433,6 @@ fn generate_from_migration_reports_failing_file() {
         .args([
             "trigger",
             "generate",
-            "--from-migration",
             migrations_dir.to_str().expect("utf8 path"),
             "--table",
             "users",
@@ -447,43 +445,120 @@ fn generate_from_migration_reports_failing_file() {
 }
 
 #[test]
-fn generate_requires_exactly_one_schema_source() {
-    Command::cargo_bin("dolog")
-        .expect("build dolog binary")
-        .args(["trigger", "generate", "--table", "users"])
-        .assert()
-        .failure();
-
-    let db_path = unique_db_path();
-    let connection = Connection::open(&db_path).expect("create sqlite database");
-    connection
-        .execute_batch("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);")
-        .expect("create users table");
-    drop(connection);
-
-    let migrations_dir = unique_migration_dir();
-    write_migration(
-        &migrations_dir,
-        "001_create_users.sql",
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);",
-    );
+fn generate_from_sql_file_prints_sql_to_stdout() {
+    let schema_path = unique_sql_path();
+    fs::write(
+        &schema_path,
+        "CREATE TABLE users (
+            id INTEGER PRIMARY KEY,
+            email TEXT NOT NULL
+        );",
+    )
+    .expect("write schema sql");
 
     Command::cargo_bin("dolog")
         .expect("build dolog binary")
         .args([
             "trigger",
             "generate",
-            db_path.to_str().expect("utf8 path"),
-            "--from-migration",
-            migrations_dir.to_str().expect("utf8 path"),
+            schema_path.to_str().expect("utf8 path"),
             "--table",
             "users",
         ])
         .assert()
-        .failure();
+        .success()
+        .stdout(predicate::str::contains(
+            "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
+        ))
+        .stdout(predicate::str::contains(
+            "CREATE TRIGGER \"dolog_users_insert\"",
+        ));
 
-    fs::remove_file(db_path).expect("remove temp db");
-    fs::remove_dir_all(migrations_dir).expect("remove migration directory");
+    fs::remove_file(schema_path).expect("remove schema sql");
+}
+
+#[test]
+fn generate_from_sql_file_rejects_apply() {
+    let schema_path = unique_sql_path();
+    fs::write(
+        &schema_path,
+        "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL);",
+    )
+    .expect("write schema sql");
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            schema_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "--apply is only supported when the schema source path is a real SQLite database file",
+        ));
+
+    fs::remove_file(schema_path).expect("remove schema sql");
+}
+
+#[test]
+fn generate_from_sql_file_reports_failing_file() {
+    let schema_path = unique_sql_path();
+    fs::write(&schema_path, "CREATE TABLE users (id INTEGER").expect("write schema sql");
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            schema_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            schema_path.file_name().expect("schema filename").to_str().expect("utf8"),
+        ));
+
+    fs::remove_file(schema_path).expect("remove schema sql");
+}
+
+#[test]
+fn generate_requires_schema_source_path() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["trigger", "generate", "--table", "users"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn generate_reports_missing_schema_source_path() {
+    let missing_path = std::env::temp_dir().join(format!(
+        "dolog_missing_schema_{}.sqlite",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            missing_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to read schema source"));
 }
 
 #[test]
