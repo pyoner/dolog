@@ -405,7 +405,9 @@ pub enum AppError {
         #[source]
         source: std::io::Error,
     },
-    #[error("unsupported schema source at '{path}'; expected a SQLite database file, a directory, or a .sql file")]
+    #[error(
+        "unsupported schema source at '{path}'; expected a SQLite database file, a directory, or a .sql file"
+    )]
     UnsupportedSchemaSource { path: String },
     #[error("failed to read migration directory '{path}': {source}")]
     ReadMigrationDirectory {

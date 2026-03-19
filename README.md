@@ -188,7 +188,11 @@ cargo run -p dolog -- log export --query --limit 100
 
 `dolog log export` reads rows from `_dolog_changes`, appends them to a JSONL file, and then deletes the exported rows from the database.
 
+When `--limit` is omitted, normal export processes the next 100 rows by default.
+
 `dolog log export --dry-run` writes those same JSONL rows to stdout without removing them from the database.
+
+When `--limit` is omitted, dry-run also reads the next 100 rows by default.
 
 `dolog log export --query` prints a JSON payload with `select.sql` and `delete.sql` statements for platform-side export. With `--limit`, the limit is inlined into `select.sql`; otherwise the query keeps the `:limit` placeholder.
 
@@ -257,6 +261,6 @@ The test suite includes:
 - `trigger generate` does not allow a SQL file path and `--apply` together.
 - The log table defaults to `_dolog_changes`.
 - The trigger prefix defaults to `dolog`.
-- `log export <db> <output-file>` appends exported rows to the output file and removes those rows from `_dolog_changes`.
-- `log export <db> --dry-run` writes the export rows to stdout in JSONL format without deleting them.
+- `log export <db> <output-file>` appends the next 100 exported rows to the output file by default and removes those rows from `_dolog_changes`.
+- `log export <db> --dry-run` writes the next 100 export rows to stdout by default without deleting them.
 - `log export <db> --query` prints a JSON payload with platform-agnostic export SQL.

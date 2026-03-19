@@ -12,6 +12,8 @@ use crate::trigger::{
     AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
 
+const DEFAULT_LOG_EXPORT_LIMIT: usize = 100;
+
 #[derive(Debug, Parser)]
 #[command(name = "dolog")]
 #[command(
@@ -95,7 +97,10 @@ struct LogExportArgs {
         help = "Name of the dolog log table"
     )]
     log_table: String,
-    #[arg(long, help = "Export at most this many rows")]
+    #[arg(
+        long,
+        help = "Export at most this many rows (defaults to 100 for export and dry-run)"
+    )]
     limit: Option<usize>,
     #[arg(
         long,
@@ -121,13 +126,15 @@ impl LogExportArgs {
             return Ok(());
         }
 
+        let limit = self.limit.or(Some(DEFAULT_LOG_EXPORT_LIMIT));
+
         let db = self
             .db
             .as_ref()
             .expect("clap enforces <DB> unless --query is used");
         let mut connection = open_connection(db)?;
         if self.dry_run {
-            let lines = preview_logs(&connection, &self.log_table, self.limit)?;
+            let lines = preview_logs(&connection, &self.log_table, limit)?;
             for line in lines {
                 println!("{line}");
             }
@@ -135,7 +142,7 @@ impl LogExportArgs {
         }
 
         let output = self.output.ok_or(AppError::MissingExportOutput)?;
-        let result = export_logs(&mut connection, &self.log_table, &output, self.limit)?;
+        let result = export_logs(&mut connection, &self.log_table, &output, limit)?;
 
         println!(
             "Exported {} change rows to '{}'.",

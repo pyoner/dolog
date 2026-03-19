@@ -522,7 +522,11 @@ fn generate_from_sql_file_reports_failing_file() {
         .assert()
         .failure()
         .stderr(predicate::str::contains(
-            schema_path.file_name().expect("schema filename").to_str().expect("utf8"),
+            schema_path
+                .file_name()
+                .expect("schema filename")
+                .to_str()
+                .expect("utf8"),
         ));
 
     fs::remove_file(schema_path).expect("remove schema sql");
@@ -904,6 +908,70 @@ fn log_export_writes_jsonl_and_deletes_exported_rows() {
 }
 
 #[test]
+fn log_export_defaults_to_100_rows_when_limit_is_omitted() {
+    let db_path = unique_db_path();
+    let output_path = unique_jsonl_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    for index in 0..105 {
+        connection
+            .execute(
+                "INSERT INTO users (email) VALUES (?1)",
+                [format!("user-{index}@example.com")],
+            )
+            .expect("insert user");
+    }
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            db_path.to_str().expect("utf8 path"),
+            output_path.to_str().expect("utf8 path"),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Exported 100 change rows to"));
+
+    let exported = std::fs::read_to_string(&output_path).expect("read exported file");
+    assert_eq!(exported.lines().count(), 100);
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let remaining: i64 = connection
+        .query_row("SELECT COUNT(*) FROM _dolog_changes", [], |row| row.get(0))
+        .expect("count remaining logs");
+    assert_eq!(remaining, 5);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+    std::fs::remove_file(output_path).expect("remove temp export");
+}
+
+#[test]
 fn log_export_dry_run_does_not_require_output_or_delete_rows() {
     let db_path = unique_db_path();
     let connection = Connection::open(&db_path).expect("create sqlite database");
@@ -954,6 +1022,67 @@ fn log_export_dry_run_does_not_require_output_or_delete_rows() {
         .query_row("SELECT COUNT(*) FROM _dolog_changes", [], |row| row.get(0))
         .expect("count remaining logs");
     assert_eq!(remaining, 1);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn log_export_dry_run_defaults_to_100_rows_when_limit_is_omitted() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    for index in 0..105 {
+        connection
+            .execute(
+                "INSERT INTO users (email) VALUES (?1)",
+                [format!("user-{index}@example.com")],
+            )
+            .expect("insert user");
+    }
+    drop(connection);
+
+    let assert = Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            db_path.to_str().expect("utf8 path"),
+            "--dry-run",
+        ])
+        .assert()
+        .success();
+
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).expect("utf8 stdout");
+    assert_eq!(stdout.lines().count(), 100);
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let remaining: i64 = connection
+        .query_row("SELECT COUNT(*) FROM _dolog_changes", [], |row| row.get(0))
+        .expect("count remaining logs");
+    assert_eq!(remaining, 105);
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
