@@ -7,7 +7,7 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use rusqlite::Connection;
 
-use crate::log_export::{export_logs, log_status, preview_logs};
+use crate::log_export::{build_export_query, export_logs, log_status, preview_logs};
 use crate::trigger::{
     AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
@@ -63,8 +63,8 @@ impl LogCommand {
 enum LogAction {
     #[command(
         about = "Export pending change rows as JSON Lines",
-        long_about = "Export rows from the dolog log table as JSON Lines. In normal mode, the command appends rows to an output file and then removes those rows from the database. In dry-run mode, it writes the same JSONL rows to stdout and does not delete them.",
-        after_help = "Examples:\n  dolog log export db.sqlite changes.jsonl\n  dolog log export db.sqlite changes.jsonl --limit 100\n  dolog log export db.sqlite --dry-run"
+        long_about = "Export rows from the dolog log table as JSON Lines. In normal mode, the command appends rows to an output file and then removes those rows from the database. In dry-run mode, it writes the same JSONL rows to stdout and does not delete them. In query mode, it prints a JSON payload with platform-agnostic select and delete SQL instead of reading or deleting rows.",
+        after_help = "Examples:\n  dolog log export db.sqlite changes.jsonl\n  dolog log export db.sqlite changes.jsonl --limit 100\n  dolog log export db.sqlite --dry-run\n  dolog log export --query\n  dolog log export --query --limit 100"
     )]
     Export(LogExportArgs),
     #[command(
@@ -77,10 +77,15 @@ enum LogAction {
 
 #[derive(Debug, Args)]
 struct LogExportArgs {
-    #[arg(help = "SQLite database file to read pending change rows from")]
-    db: PathBuf,
     #[arg(
+        required_unless_present = "query",
+        help = "SQLite database file to read pending change rows from"
+    )]
+    db: Option<PathBuf>,
+    #[arg(
+        required_unless_present_any = ["dry_run", "query"],
         conflicts_with = "dry_run",
+        conflicts_with = "query",
         help = "Write exported JSONL rows to this file"
     )]
     output: Option<PathBuf>,
@@ -95,14 +100,32 @@ struct LogExportArgs {
     #[arg(
         long,
         conflicts_with = "output",
+        conflicts_with = "query",
         help = "Write JSONL rows to stdout without deleting them from the database"
     )]
     dry_run: bool,
+    #[arg(
+        long,
+        conflicts_with = "output",
+        conflicts_with = "dry_run",
+        help = "Print a JSON payload with select/delete SQL for platform-side export"
+    )]
+    query: bool,
 }
 
 impl LogExportArgs {
     fn run(self) -> Result<(), AppError> {
-        let mut connection = open_connection(&self.db)?;
+        if self.query {
+            let query = build_export_query(&self.log_table, self.limit);
+            println!("{}", serde_json::to_string_pretty(&query)?);
+            return Ok(());
+        }
+
+        let db = self
+            .db
+            .as_ref()
+            .expect("clap enforces <DB> unless --query is used");
+        let mut connection = open_connection(db)?;
         if self.dry_run {
             let lines = preview_logs(&connection, &self.log_table, self.limit)?;
             for line in lines {
@@ -476,12 +499,15 @@ fn open_migration_connection(dir: &Path) -> Result<Connection, AppError> {
     })?;
     let mut files = Vec::new();
 
-    while let Some(entry) = entries.next().transpose().map_err(|source| {
-        AppError::ReadMigrationDirectory {
-            path: dir.display().to_string(),
-            source,
-        }
-    })? {
+    while let Some(entry) =
+        entries
+            .next()
+            .transpose()
+            .map_err(|source| AppError::ReadMigrationDirectory {
+                path: dir.display().to_string(),
+                source,
+            })?
+    {
         let path = entry.path();
         if path
             .extension()

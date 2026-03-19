@@ -91,11 +91,76 @@ fn log_export_help_describes_dry_run_and_output_modes() {
             "In dry-run mode, it writes the same JSONL rows to stdout and does not delete them.",
         ))
         .stdout(predicate::str::contains(
+            "In query mode, it prints a JSON payload with platform-agnostic select and delete SQL",
+        ))
+        .stdout(predicate::str::contains(
             "Write exported JSONL rows to this file",
         ))
         .stdout(predicate::str::contains(
             "dolog log export db.sqlite --dry-run",
+        ))
+        .stdout(predicate::str::contains("dolog log export --query"));
+}
+
+#[test]
+fn log_export_query_prints_json_payload() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["log", "export", "--query"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"version\": 1"))
+        .stdout(predicate::str::contains("\"table\": \"_dolog_changes\""))
+        .stdout(predicate::str::contains("LIMIT :limit"))
+        .stdout(predicate::str::contains(
+            "DELETE FROM \\\"_dolog_changes\\\" WHERE id <= :max_id",
         ));
+}
+
+#[test]
+fn log_export_query_inlines_limit_and_custom_table() {
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            "--query",
+            "--limit",
+            "100",
+            "--log-table",
+            "custom_changes",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"table\": \"custom_changes\""))
+        .stdout(predicate::str::contains("LIMIT 100"))
+        .stdout(predicate::str::contains(
+            "DELETE FROM \\\"custom_changes\\\" WHERE id <= :max_id",
+        ));
+}
+
+#[test]
+fn log_export_query_conflicts_with_output_and_dry_run() {
+    let db_path = unique_db_path();
+    let output_path = unique_jsonl_path();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "log",
+            "export",
+            db_path.to_str().expect("utf8 path"),
+            output_path.to_str().expect("utf8 path"),
+            "--query",
+        ])
+        .assert()
+        .failure();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args(["log", "export", "--query", "--dry-run"])
+        .assert()
+        .failure();
 }
 
 #[test]
@@ -358,7 +423,11 @@ fn generate_from_migration_requires_sql_files() {
 #[test]
 fn generate_from_migration_reports_failing_file() {
     let migrations_dir = unique_migration_dir();
-    write_migration(&migrations_dir, "001_bad.sql", "CREATE TABLE users (id INTEGER");
+    write_migration(
+        &migrations_dir,
+        "001_bad.sql",
+        "CREATE TABLE users (id INTEGER",
+    );
 
     Command::cargo_bin("dolog")
         .expect("build dolog binary")

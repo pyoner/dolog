@@ -10,6 +10,43 @@ use serde_json::Value;
 
 use crate::trigger::AppError;
 
+#[derive(Debug, Serialize)]
+pub struct ExportQueryPayload {
+    pub version: u8,
+    pub table: String,
+    pub select: ExportQueryStatement,
+    pub delete: ExportQueryStatement,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportQueryStatement {
+    pub sql: String,
+}
+
+pub fn build_export_query(log_table: &str, limit: Option<usize>) -> ExportQueryPayload {
+    let quoted_table = quote_ident(log_table);
+    let limit_clause = match limit {
+        Some(limit) => limit.to_string(),
+        None => ":limit".to_owned(),
+    };
+
+    ExportQueryPayload {
+        version: 1,
+        table: log_table.to_owned(),
+        select: ExportQueryStatement {
+            sql: format!(
+                "SELECT id, table_name, operation, old_values, new_values, changed_at \
+                 FROM {quoted_table} \
+                 ORDER BY id \
+                 LIMIT {limit_clause}"
+            ),
+        },
+        delete: ExportQueryStatement {
+            sql: format!("DELETE FROM {quoted_table} WHERE id <= :max_id"),
+        },
+    }
+}
+
 pub fn export_logs(
     connection: &mut Connection,
     log_table: &str,

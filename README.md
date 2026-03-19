@@ -173,9 +173,18 @@ Dry run without writing or deleting:
 cargo run -p dolog -- log export db.sqlite --dry-run
 ```
 
+Print platform-agnostic export queries as JSON:
+
+```bash
+cargo run -p dolog -- log export --query
+cargo run -p dolog -- log export --query --limit 100
+```
+
 `dolog log export` reads rows from `_dolog_changes`, appends them to a JSONL file, and then deletes the exported rows from the database.
 
 `dolog log export --dry-run` writes those same JSONL rows to stdout without removing them from the database.
+
+`dolog log export --query` prints a JSON payload with `select.sql` and `delete.sql` statements for platform-side export. With `--limit`, the limit is inlined into `select.sql`; otherwise the query keeps the `:limit` placeholder.
 
 `dolog log status` shows pending change rows grouped by table and operation before export.
 
@@ -242,3 +251,4 @@ The test suite includes:
 - The trigger prefix defaults to `dolog`.
 - `log export <db> <output-file>` appends exported rows to the output file and removes those rows from `_dolog_changes`.
 - `log export <db> --dry-run` writes the export rows to stdout in JSONL format without deleting them.
+- `log export <db> --query` prints a JSON payload with platform-agnostic export SQL.

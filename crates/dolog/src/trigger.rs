@@ -417,7 +417,9 @@ pub enum AppError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error("--apply is not supported with --from-migration because there is no target database to modify")]
+    #[error(
+        "--apply is not supported with --from-migration because there is no target database to modify"
+    )]
     ApplyUnsupportedWithMigrationSource,
     #[error("an output file is required unless --dry-run is used")]
     MissingExportOutput,
