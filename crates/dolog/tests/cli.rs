@@ -715,6 +715,241 @@ fn generate_drop_removes_selected_operations() {
 }
 
 #[test]
+fn generate_apply_skips_unchanged_triggers() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let original_sql = trigger_sql(&connection, "dolog_users_insert");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No trigger changes were needed for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(trigger_sql(&connection, "dolog_users_insert"), original_sql);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_apply_refreshes_trigger_after_table_change() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert!(!trigger_sql(&connection, "dolog_users_insert").contains("NEW.\"name\""));
+    connection
+        .execute("ALTER TABLE users ADD COLUMN name TEXT", [])
+        .expect("alter users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Applied trigger SQL for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert!(trigger_sql(&connection, "dolog_users_insert").contains("NEW.\"name\""));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_apply_recreates_missing_trigger_only() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let preserved_sql = trigger_sql(&connection, "dolog_users_update");
+    connection
+        .execute_batch("DROP TRIGGER dolog_users_insert;")
+        .expect("drop insert trigger");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Applied trigger SQL for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(trigger_names(&connection).len(), 3);
+    assert_eq!(
+        trigger_sql(&connection, "dolog_users_update"),
+        preserved_sql
+    );
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_apply_replaces_drifted_trigger() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    connection
+        .execute_batch(
+            "DROP TRIGGER dolog_users_insert;
+             CREATE TRIGGER dolog_users_insert
+             AFTER INSERT ON users
+             BEGIN
+                 INSERT INTO _dolog_changes (table_name, operation, old_values, new_values)
+                 VALUES ('users', 'INSERT', NULL, json_object('id', NEW.\"id\"));
+             END;",
+        )
+        .expect("replace with drifted trigger");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Applied trigger SQL for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let refreshed_sql = trigger_sql(&connection, "dolog_users_insert");
+    assert!(refreshed_sql.contains("NEW.\"email\""));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn generate_rejects_sql_file_with_apply() {
     let db_path = unique_db_path();
     let output_path = unique_sql_path();
@@ -1151,6 +1386,16 @@ fn trigger_names(connection: &Connection) -> Vec<String> {
         .expect("query triggers");
 
     rows.map(|row| row.expect("row")).collect()
+}
+
+fn trigger_sql(connection: &Connection, trigger: &str) -> String {
+    connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+            [trigger],
+            |row| row.get(0),
+        )
+        .expect("read trigger sql")
 }
 
 fn table_exists(connection: &Connection, table: &str) -> bool {

@@ -112,6 +112,42 @@ impl TriggerManager {
         Ok(ExecutionPlan::new(statements))
     }
 
+    pub fn plan_apply_changed(
+        &self,
+        connection: &Connection,
+        table: &str,
+        operations: &[Operation],
+    ) -> Result<ExecutionPlan, AppError> {
+        let target = self.describe_target(connection, table)?;
+        let existing = self.existing_trigger_sql(connection, &target.name)?;
+        let mut statements = Vec::new();
+        let mut needs_log_table = false;
+
+        for operation in operations.iter().copied() {
+            let trigger_name = self.trigger_name(&target.name, operation);
+            let desired_sql = self.create_trigger_sql(&target, operation);
+
+            match existing.get(&trigger_name) {
+                Some(current_sql) if sql_matches(current_sql, &desired_sql) => {}
+                Some(_) => {
+                    needs_log_table = true;
+                    statements.push(self.drop_trigger_sql(&target.name, operation));
+                    statements.push(desired_sql);
+                }
+                None => {
+                    needs_log_table = true;
+                    statements.push(desired_sql);
+                }
+            }
+        }
+
+        if needs_log_table {
+            statements.insert(0, self.create_log_table_sql());
+        }
+
+        Ok(ExecutionPlan::new(statements))
+    }
+
     pub fn plan_delete(
         &self,
         connection: &Connection,
@@ -205,6 +241,27 @@ impl TriggerManager {
             name: table.to_owned(),
             columns,
         })
+    }
+
+    fn existing_trigger_sql(
+        &self,
+        connection: &Connection,
+        table: &str,
+    ) -> Result<std::collections::HashMap<String, String>, AppError> {
+        let like_pattern = format!("{}_{}_%", self.trigger_prefix, table);
+        let mut statement = connection.prepare(
+            "SELECT name, sql
+             FROM sqlite_master
+             WHERE type = 'trigger' AND tbl_name = ?1 AND name LIKE ?2",
+        )?;
+
+        let rows = statement.query_map([table, like_pattern.as_str()], |row| {
+            let sql = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            Ok((row.get::<_, String>(0)?, sql))
+        })?;
+
+        rows.collect::<Result<std::collections::HashMap<_, _>, _>>()
+            .map_err(AppError::from)
     }
 
     fn create_log_table_sql(&self) -> String {
@@ -377,6 +434,17 @@ fn json_object_expr(alias: &str, columns: &[String]) -> String {
     format!("json_object({entries})")
 }
 
+fn sql_matches(left: &str, right: &str) -> bool {
+    normalize_sql(left) == normalize_sql(right)
+}
+
+fn normalize_sql(sql: &str) -> String {
+    sql.trim_end_matches(';')
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn quote_ident(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
@@ -429,7 +497,9 @@ pub enum AppError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error("--apply is only supported when the schema source path is a real SQLite database file")]
+    #[error(
+        "--apply is only supported when the schema source path is a real SQLite database file"
+    )]
     ApplyUnsupportedWithSchemaSource,
     #[error("an output file is required unless --dry-run is used")]
     MissingExportOutput,
@@ -447,7 +517,7 @@ pub enum AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{json_object_expr, quote_ident, quote_string};
+    use super::{json_object_expr, normalize_sql, quote_ident, quote_string, sql_matches};
 
     #[test]
     fn quotes_identifiers() {
@@ -466,5 +536,21 @@ mod tests {
             expr,
             "json_object('id', NEW.\"id\", 'email', NEW.\"email\")"
         );
+    }
+
+    #[test]
+    fn normalizes_sql_whitespace() {
+        assert_eq!(
+            normalize_sql("CREATE TRIGGER a\n  AFTER INSERT ON users\nBEGIN\n  SELECT 1;\nEND"),
+            "CREATE TRIGGER a AFTER INSERT ON users BEGIN SELECT 1; END"
+        );
+    }
+
+    #[test]
+    fn matches_sql_after_normalization() {
+        assert!(sql_matches(
+            "CREATE TRIGGER a\nAFTER INSERT ON users BEGIN SELECT 1; END",
+            "CREATE   TRIGGER   a AFTER INSERT ON users BEGIN SELECT 1; END"
+        ));
     }
 }

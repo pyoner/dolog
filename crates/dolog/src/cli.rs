@@ -9,7 +9,7 @@ use rusqlite::Connection;
 
 use crate::log_export::{build_export_query, export_logs, log_status, preview_logs};
 use crate::trigger::{
-    AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
+    open_connection, AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager,
 };
 
 const DEFAULT_LOG_EXPORT_LIMIT: usize = 100;
@@ -275,7 +275,17 @@ impl TriggerGenerateArgs {
         let manager = TriggerManager::new(self.log_table, self.trigger_prefix);
         let tables = resolve_tables(&manager, &connection, self.table, self.all_tables)?;
         let operations = resolve_operations(self.operation);
-        let plan = if self.drop {
+        let plan = if self.apply && !self.drop {
+            collect_plan(
+                &manager,
+                &connection,
+                &tables,
+                &operations,
+                |manager, connection, table, operations| {
+                    manager.plan_apply_changed(connection, table, operations)
+                },
+            )?
+        } else if self.drop {
             collect_plan(
                 &manager,
                 &connection,
@@ -298,6 +308,14 @@ impl TriggerGenerateArgs {
         };
 
         if self.apply {
+            if plan.statements().is_empty() {
+                println!(
+                    "No trigger changes were needed for {}.",
+                    format_table_targets(&tables)
+                );
+                return Ok(());
+            }
+
             manager.apply_plan(&mut connection, &plan)?;
             println!("Applied trigger SQL for {}.", format_table_targets(&tables));
             return Ok(());
@@ -453,7 +471,11 @@ fn operation_from_trigger_name(prefix: &str, table: &str, trigger_name: &str) ->
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn print_status_table(db: &PathBuf, rows: &[StatusRow]) {

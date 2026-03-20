@@ -113,6 +113,8 @@ Apply the generated SQL directly:
 cargo run -p dolog -- trigger generate db.sqlite --table users --apply
 ```
 
+When you use `--apply`, `dolog` only creates or refreshes a managed trigger if that trigger is missing or the current table definition no longer matches the installed trigger SQL.
+
 Generate triggers for multiple tables:
 
 ```bash
