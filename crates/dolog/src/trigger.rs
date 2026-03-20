@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 use rusqlite::{Connection, OpenFlags};
 use thiserror::Error;
@@ -206,6 +206,24 @@ impl TriggerManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
     }
 
+    pub fn resolve_target_table(
+        &self,
+        connection: &Connection,
+        table: &str,
+    ) -> Result<String, AppError> {
+        if table.eq_ignore_ascii_case(&self.log_table) {
+            return Err(AppError::ReservedLogTable(self.log_table.clone()));
+        }
+
+        let name = resolve_table_name(connection, table)?;
+
+        if name.eq_ignore_ascii_case(&self.log_table) {
+            return Err(AppError::ReservedLogTable(name));
+        }
+
+        Ok(name)
+    }
+
     pub fn apply_plan(
         &self,
         connection: &mut Connection,
@@ -226,28 +244,22 @@ impl TriggerManager {
         connection: &Connection,
         table: &str,
     ) -> Result<TableDefinition, AppError> {
-        if table == self.log_table {
-            return Err(AppError::ReservedLogTable(table.to_owned()));
-        }
+        let name = self.resolve_target_table(connection, table)?;
 
-        ensure_table_exists(connection, table)?;
-        let columns = table_columns(connection, table)?;
+        let columns = table_columns(connection, &name)?;
 
         if columns.is_empty() {
-            return Err(AppError::NoColumns(table.to_owned()));
+            return Err(AppError::NoColumns(name));
         }
 
-        Ok(TableDefinition {
-            name: table.to_owned(),
-            columns,
-        })
+        Ok(TableDefinition { name, columns })
     }
 
     fn existing_trigger_sql(
         &self,
         connection: &Connection,
         table: &str,
-    ) -> Result<std::collections::HashMap<String, String>, AppError> {
+    ) -> Result<HashMap<String, String>, AppError> {
         let like_pattern = format!("{}_{}_%", self.trigger_prefix, table);
         let mut statement = connection.prepare(
             "SELECT name, sql
@@ -260,7 +272,7 @@ impl TriggerManager {
             Ok((row.get::<_, String>(0)?, sql))
         })?;
 
-        rows.collect::<Result<std::collections::HashMap<_, _>, _>>()
+        rows.collect::<Result<HashMap<_, _>, _>>()
             .map_err(AppError::from)
     }
 
@@ -388,20 +400,20 @@ struct TableDefinition {
     columns: Vec<String>,
 }
 
-fn ensure_table_exists(connection: &Connection, table: &str) -> Result<(), AppError> {
+fn resolve_table_name(connection: &Connection, table: &str) -> Result<String, AppError> {
     let mut statement = connection.prepare(
-        "SELECT 1
+        "SELECT name
          FROM sqlite_master
-         WHERE type = 'table' AND name = ?1
+         WHERE type = 'table' AND lower(name) = lower(?1)
          LIMIT 1",
     )?;
 
-    let exists = statement.exists([table])?;
-    if exists {
-        Ok(())
-    } else {
-        Err(AppError::MissingTable(table.to_owned()))
-    }
+    statement
+        .query_row([table], |row| row.get(0))
+        .map_err(|source| match source {
+            rusqlite::Error::QueryReturnedNoRows => AppError::MissingTable(table.to_owned()),
+            other => AppError::from(other),
+        })
 }
 
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>, AppError> {
@@ -439,10 +451,42 @@ fn sql_matches(left: &str, right: &str) -> bool {
 }
 
 fn normalize_sql(sql: &str) -> String {
-    sql.trim_end_matches(';')
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut normalized = String::with_capacity(sql.len());
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut previous_was_whitespace = false;
+
+    for ch in sql.trim_end_matches(';').chars() {
+        match ch {
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+                normalized.push(ch);
+                previous_was_whitespace = false;
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+                normalized.push(ch);
+                previous_was_whitespace = false;
+            }
+            _ if ch.is_whitespace() => {
+                if !previous_was_whitespace {
+                    normalized.push(' ');
+                    previous_was_whitespace = true;
+                }
+            }
+            _ => {
+                let normalized_char = if in_single_quote {
+                    ch
+                } else {
+                    ch.to_ascii_lowercase()
+                };
+                normalized.push(normalized_char);
+                previous_was_whitespace = false;
+            }
+        }
+    }
+
+    normalized.trim().to_owned()
 }
 
 fn quote_ident(value: &str) -> String {
@@ -542,7 +586,7 @@ mod tests {
     fn normalizes_sql_whitespace() {
         assert_eq!(
             normalize_sql("CREATE TRIGGER a\n  AFTER INSERT ON users\nBEGIN\n  SELECT 1;\nEND"),
-            "CREATE TRIGGER a AFTER INSERT ON users BEGIN SELECT 1; END"
+            "create trigger a after insert on users begin select 1; end"
         );
     }
 
@@ -552,5 +596,13 @@ mod tests {
             "CREATE TRIGGER a\nAFTER INSERT ON users BEGIN SELECT 1; END",
             "CREATE   TRIGGER   a AFTER INSERT ON users BEGIN SELECT 1; END"
         ));
+    }
+
+    #[test]
+    fn preserves_single_quoted_string_case() {
+        assert_eq!(
+            normalize_sql("VALUES ('Users', 'INSERT')"),
+            "values ('Users', 'INSERT')"
+        );
     }
 }

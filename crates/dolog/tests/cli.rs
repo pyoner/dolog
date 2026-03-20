@@ -950,6 +950,149 @@ fn generate_apply_replaces_drifted_trigger() {
 }
 
 #[test]
+fn generate_apply_accepts_mixed_case_table_input() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "Users",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Applied trigger SQL for table 'Users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(
+        trigger_names(&connection),
+        vec![
+            "dolog_users_delete".to_owned(),
+            "dolog_users_insert".to_owned(),
+            "dolog_users_update".to_owned()
+        ]
+    );
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_rejects_mixed_case_log_table_name() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE _dolog_changes (
+                id INTEGER PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                old_values TEXT,
+                new_values TEXT,
+                changed_at TEXT NOT NULL
+            );",
+        )
+        .expect("create log table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "_DOLOG_CHANGES",
+            "--apply",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "conflicts with the configured log table",
+        ));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_apply_skips_triggers_that_only_differ_by_sql_case() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            r#"CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );
+            CREATE TABLE _dolog_changes (
+                id INTEGER PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                operation TEXT NOT NULL,
+                old_values TEXT,
+                new_values TEXT,
+                changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            create trigger "dolog_users_insert"
+            after insert on "users"
+            begin
+                insert into "_dolog_changes" (table_name, operation, old_values, new_values)
+                values ('users', 'INSERT', NULL, json_object('id', NEW."id", 'email', NEW."email"));
+            end;
+            create trigger "dolog_users_update"
+            after update on "users"
+            begin
+                insert into "_dolog_changes" (table_name, operation, old_values, new_values)
+                values ('users', 'UPDATE', json_object('id', OLD."id", 'email', OLD."email"), json_object('id', NEW."id", 'email', NEW."email"));
+            end;
+            create trigger "dolog_users_delete"
+            after delete on "users"
+            begin
+                insert into "_dolog_changes" (table_name, operation, old_values, new_values)
+                values ('users', 'DELETE', json_object('id', OLD."id", 'email', OLD."email"), NULL);
+            end;"#,
+        )
+        .expect("create lowercase triggers");
+    let insert_sql = trigger_sql(&connection, "dolog_users_insert");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "No trigger changes were needed for table 'users'.",
+        ));
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    assert_eq!(trigger_sql(&connection, "dolog_users_insert"), insert_sql);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
 fn generate_rejects_sql_file_with_apply() {
     let db_path = unique_db_path();
     let output_path = unique_sql_path();
@@ -1025,6 +1168,51 @@ fn status_reports_operation_coverage() {
         .success()
         .stdout(predicate::str::contains("Trigger status for"))
         .stdout(predicate::str::contains("TABLE"))
+        .stdout(predicate::str::contains("users  yes"));
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn status_accepts_mixed_case_table_input() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--operation",
+            "insert",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "status",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "Users",
+        ])
+        .assert()
+        .success()
         .stdout(predicate::str::contains("users  yes"));
 
     std::fs::remove_file(db_path).expect("remove temp db");

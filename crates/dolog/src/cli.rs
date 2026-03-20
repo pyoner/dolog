@@ -399,7 +399,7 @@ impl StatusArgs {
         let tables = if self.table.is_empty() {
             manager.list_target_tables(&connection)?
         } else {
-            unique_tables(self.table)
+            resolve_status_tables(&manager, &connection, self.table)?
         };
         let triggers = manager.list_triggers(&connection, None)?;
 
@@ -445,7 +445,10 @@ impl TableStatus {
     fn from_triggers(prefix: &str, table: &str, triggers: &[ManagedTrigger]) -> Self {
         let mut status = Self::default();
 
-        for trigger in triggers.iter().filter(|trigger| trigger.table == table) {
+        for trigger in triggers
+            .iter()
+            .filter(|trigger| trigger.table.eq_ignore_ascii_case(table))
+        {
             match operation_from_trigger_name(prefix, table, &trigger.name) {
                 Some(Operation::Insert) => status.insert = true,
                 Some(Operation::Update) => status.update = true,
@@ -459,7 +462,8 @@ impl TableStatus {
 }
 
 fn operation_from_trigger_name(prefix: &str, table: &str, trigger_name: &str) -> Option<Operation> {
-    let stem = format!("{prefix}_{table}_");
+    let stem = format!("{prefix}_{table}_").to_ascii_lowercase();
+    let trigger_name = trigger_name.to_ascii_lowercase();
     let suffix = trigger_name.strip_prefix(&stem)?;
 
     match suffix {
@@ -695,6 +699,24 @@ fn resolve_tables(
     }
 
     Ok(unique_tables(tables))
+}
+
+fn resolve_status_tables(
+    manager: &TriggerManager,
+    connection: &rusqlite::Connection,
+    tables: Vec<String>,
+) -> Result<Vec<String>, AppError> {
+    let mut seen = BTreeSet::new();
+    let mut resolved = Vec::new();
+
+    for table in tables {
+        let canonical = manager.resolve_target_table(connection, &table)?;
+        if seen.insert(canonical.clone()) {
+            resolved.push(canonical);
+        }
+    }
+
+    Ok(resolved)
 }
 
 fn resolve_operations(operations: Vec<OperationArg>) -> Vec<Operation> {
