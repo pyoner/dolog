@@ -28,12 +28,6 @@ cargo run -p dolog -- --help
 
 ## Quick Start
 
-Create a sample database from `seed.sql`:
-
-```bash
-sqlite3 db.sqlite < seed.sql
-```
-
 Apply managed triggers for the `users` table:
 
 ```bash
