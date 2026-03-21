@@ -72,7 +72,21 @@ cargo run -p dolog -- log export db.sqlite changes.jsonl
 
 ## Install And Run
 
-Show top-level help:
+Install from a local clone:
+
+```bash
+cargo install --path crates/dolog
+dolog --help
+```
+
+Install directly from GitHub:
+
+```bash
+cargo install --git https://github.com/pyoner/dolog.git dolog
+dolog --help
+```
+
+Run without installing:
 
 ```bash
 cargo run -p dolog -- --help
@@ -84,7 +98,7 @@ Show help for trigger commands:
 cargo run -p dolog -- trigger --help
 ```
 
-Build the binary:
+Build the binary manually:
 
 ```bash
 cargo build -p dolog
