@@ -1,8 +1,8 @@
-# dolog
+# About
 
-`dolog` is a Rust CLI for capturing SQLite row changes with managed triggers.
+Track SQLite changes and export them as JSON logs.
 
-It helps you install or refresh triggers on your tables, see what changes are waiting, and export those captured rows as JSON Lines.
+A simple CLI for SQLite change logging, trigger management, and JSONL export.
 
 ## Install
 
