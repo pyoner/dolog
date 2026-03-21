@@ -7,20 +7,6 @@ description: Use when working with the dolog Rust CLI for SQLite change capture,
 
 Use this skill when the task is specifically about the `dolog` CLI in this repository.
 
-## When to Use
-
-- The user wants to generate, apply, refresh, or remove `dolog`-managed SQLite triggers.
-- The user wants to inspect trigger coverage for one or more tables.
-- The user wants to inspect pending rows in the dolog log table.
-- The user wants to export captured change rows to JSONL or preview an export safely.
-- The user wants to generate trigger SQL from a live SQLite database, a migration directory, or a single schema SQL file.
-
-## When Not to Use
-
-- The task is about generic SQLite trigger authoring unrelated to `dolog`.
-- The task is about changing the Rust implementation unless the user is explicitly asking for code changes in this repo.
-- The task is about future sinks or third-party APIs that the current CLI does not support yet.
-
 ## Mental Model
 
 `dolog` manages SQLite triggers that write captured row changes into a log table.
