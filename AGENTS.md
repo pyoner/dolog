@@ -21,7 +21,7 @@ The current design center is:
 - Log export logic: `crates/dolog/src/log_export.rs`
 - Integration tests: `crates/dolog/tests/`
 - Sample assets: `seed.sql`, `migrations/`, `db.sqlite`
-- Agent skill docs: `dolog-cli/`
+- Agent skill docs: `skills/`
 
 ## Repo-Specific Rules
 No repo-local Cursor or Copilot instruction files were found.
@@ -88,23 +88,23 @@ Use substring filters when iterating on a feature area.
 ## Agent Skill
 This repo includes a repo-local Agent Skill for the CLI:
 
-- Main skill file: `dolog-cli/SKILL.md`
-- Trigger generate reference: `dolog-cli/references/trigger-generate.md`
-- Trigger status reference: `dolog-cli/references/trigger-status.md`
-- Log status reference: `dolog-cli/references/log-status.md`
-- Log export reference: `dolog-cli/references/log-export.md`
+- Main skill file: `skills/dolog-cli/SKILL.md`
+- Trigger generate reference: `skills/dolog-cli/references/trigger-generate.md`
+- Trigger status reference: `skills/dolog-cli/references/trigger-status.md`
+- Log status reference: `skills/dolog-cli/references/log-status.md`
+- Log export reference: `skills/dolog-cli/references/log-export.md`
 
 Use the `dolog-cli` skill when the task is about operating the CLI rather than changing Rust internals.
 
 Validate the skill structure with:
 
-`uvx --from skills-ref agentskills validate ./dolog-cli`
+`uvx --from skills-ref agentskills validate ./skills/dolog-cli`
 
 This is the preferred no-install validation command in this repo.
 
 Related checks:
 - Run `cargo test -p dolog --test cli` when command help text or examples change.
-- Update `dolog-cli/` when CLI behavior, defaults, or safety warnings change.
+- Update `skills/` when CLI behavior, defaults, or safety warnings change.
 
 ## Code Style Guidelines
 Infer conventions from the current code before changing them.
@@ -156,7 +156,7 @@ Infer conventions from the current code before changing them.
 When adding or changing a command or flag:
 - update parser definitions and help text together
 - add or update CLI integration tests in `crates/dolog/tests/cli.rs`
-- update `README.md` and `dolog-cli/` if user-facing behavior changed
+- update `README.md` and `skills/` if user-facing behavior changed
 
 ## Testing Conventions
 - Prefer integration tests against real SQLite files over mocks.

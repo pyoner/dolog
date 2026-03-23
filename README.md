@@ -103,11 +103,11 @@ dolog trigger --help
 
 For detailed command behavior and advanced workflows, see:
 
-- `dolog-cli/SKILL.md`
-- `dolog-cli/references/trigger-generate.md`
-- `dolog-cli/references/trigger-status.md`
-- `dolog-cli/references/log-status.md`
-- `dolog-cli/references/log-export.md`
+- `skills/dolog-cli/SKILL.md`
+- `skills/dolog-cli/references/trigger-generate.md`
+- `skills/dolog-cli/references/trigger-status.md`
+- `skills/dolog-cli/references/log-status.md`
+- `skills/dolog-cli/references/log-export.md`
 
 ## Development
 
