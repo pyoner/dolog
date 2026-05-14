@@ -211,10 +211,10 @@ fn generate_prints_sql_to_stdout_without_modifying_database() {
             "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
         ))
         .stdout(predicate::str::contains(
-            "CREATE TRIGGER \"dolog_users_insert\"",
+            "CREATE TRIGGER \"dolog_users_insert_",
         ))
         .stdout(predicate::str::contains(
-            "DROP TRIGGER IF EXISTS \"dolog_users_insert\";",
+            "DROP TRIGGER IF EXISTS \"dolog_users_insert_",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -257,10 +257,9 @@ fn generate_supports_operation_selection() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(
-        trigger_names(&connection),
-        vec!["dolog_users_insert".to_owned()]
-    );
+    let names = trigger_names(&connection);
+    assert_eq!(names.len(), 1);
+    assert!(is_hashed_trigger_name(&names[0], "users", "insert"));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -296,7 +295,7 @@ fn generate_writes_sql_file_without_modifying_database() {
 
     let sql = std::fs::read_to_string(&output_path).expect("read output file");
     assert!(sql.contains("CREATE TABLE IF NOT EXISTS \"_dolog_changes\""));
-    assert!(sql.contains("CREATE TRIGGER \"dolog_users_insert\""));
+    assert!(sql.contains("CREATE TRIGGER \"dolog_users_insert_"));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
     assert!(!table_exists(&connection, "_dolog_changes"));
@@ -333,7 +332,7 @@ fn generate_from_directory_prints_sql_to_stdout() {
             "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
         ))
         .stdout(predicate::str::contains(
-            "CREATE TRIGGER \"dolog_users_insert\"",
+            "CREATE TRIGGER \"dolog_users_insert_",
         ));
 
     fs::remove_dir_all(migrations_dir).expect("remove migration directory");
@@ -471,7 +470,7 @@ fn generate_from_sql_file_prints_sql_to_stdout() {
             "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
         ))
         .stdout(predicate::str::contains(
-            "CREATE TRIGGER \"dolog_users_insert\"",
+            "CREATE TRIGGER \"dolog_users_insert_",
         ));
 
     fs::remove_file(schema_path).expect("remove schema sql");
@@ -703,12 +702,22 @@ fn generate_drop_removes_selected_operations() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(
-        trigger_names(&connection),
-        vec![
-            "dolog_users_insert".to_owned(),
-            "dolog_users_update".to_owned()
-        ]
+    let names = trigger_names(&connection);
+    assert_eq!(names.len(), 2);
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "insert"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "update"))
+    );
+    assert!(
+        !names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "delete"))
     );
 
     std::fs::remove_file(db_path).expect("remove temp db");
@@ -742,7 +751,8 @@ fn generate_apply_skips_unchanged_triggers() {
         .success();
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    let original_sql = trigger_sql(&connection, "dolog_users_insert");
+    let insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    let original_sql = trigger_sql(&connection, &insert_trigger);
     drop(connection);
 
     Command::cargo_bin("dolog")
@@ -762,7 +772,50 @@ fn generate_apply_skips_unchanged_triggers() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(trigger_sql(&connection, "dolog_users_insert"), original_sql);
+    assert_eq!(trigger_sql(&connection, &insert_trigger), original_sql);
+
+    std::fs::remove_file(db_path).expect("remove temp db");
+}
+
+#[test]
+fn generate_prints_no_sql_for_unchanged_existing_triggers() {
+    let db_path = unique_db_path();
+    let connection = Connection::open(&db_path).expect("create sqlite database");
+    connection
+        .execute_batch(
+            "CREATE TABLE users (
+                id INTEGER PRIMARY KEY,
+                email TEXT NOT NULL
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -795,7 +848,8 @@ fn generate_apply_refreshes_trigger_after_table_change() {
         .success();
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert!(!trigger_sql(&connection, "dolog_users_insert").contains("NEW.\"name\""));
+    let old_insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    assert!(!trigger_sql(&connection, &old_insert_trigger).contains("NEW.\"name\""));
     connection
         .execute("ALTER TABLE users ADD COLUMN name TEXT", [])
         .expect("alter users table");
@@ -818,7 +872,10 @@ fn generate_apply_refreshes_trigger_after_table_change() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert!(trigger_sql(&connection, "dolog_users_insert").contains("NEW.\"name\""));
+    let new_insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    assert_ne!(new_insert_trigger, old_insert_trigger);
+    assert!(trigger_sql(&connection, &new_insert_trigger).contains("NEW.\"name\""));
+    assert!(!trigger_names(&connection).contains(&old_insert_trigger));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -851,9 +908,11 @@ fn generate_apply_recreates_missing_trigger_only() {
         .success();
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    let preserved_sql = trigger_sql(&connection, "dolog_users_update");
+    let insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    let update_trigger = trigger_name_for_operation(&connection, "users", "update");
+    let preserved_sql = trigger_sql(&connection, &update_trigger);
     connection
-        .execute_batch("DROP TRIGGER dolog_users_insert;")
+        .execute_batch(&format!("DROP TRIGGER {insert_trigger};"))
         .expect("drop insert trigger");
     drop(connection);
 
@@ -875,10 +934,7 @@ fn generate_apply_recreates_missing_trigger_only() {
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
     assert_eq!(trigger_names(&connection).len(), 3);
-    assert_eq!(
-        trigger_sql(&connection, "dolog_users_update"),
-        preserved_sql
-    );
+    assert_eq!(trigger_sql(&connection, &update_trigger), preserved_sql);
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -911,16 +967,17 @@ fn generate_apply_replaces_drifted_trigger() {
         .success();
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
+    let insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
     connection
-        .execute_batch(
-            "DROP TRIGGER dolog_users_insert;
+        .execute_batch(&format!(
+            r#"DROP TRIGGER "{insert_trigger}";
              CREATE TRIGGER dolog_users_insert
              AFTER INSERT ON users
              BEGIN
                  INSERT INTO _dolog_changes (table_name, operation, old_values, new_values)
-                 VALUES ('users', 'INSERT', NULL, json_object('id', NEW.\"id\"));
-             END;",
-        )
+                 VALUES ('users', 'INSERT', NULL, json_object('id', NEW."id"));
+             END;"#
+        ))
         .expect("replace with drifted trigger");
     drop(connection);
 
@@ -943,8 +1000,10 @@ fn generate_apply_replaces_drifted_trigger() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    let refreshed_sql = trigger_sql(&connection, "dolog_users_insert");
+    let refreshed_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    let refreshed_sql = trigger_sql(&connection, &refreshed_trigger);
     assert!(refreshed_sql.contains("NEW.\"email\""));
+    assert!(!trigger_names(&connection).contains(&"dolog_users_insert".to_owned()));
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -980,13 +1039,22 @@ fn generate_apply_accepts_mixed_case_table_input() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(
-        trigger_names(&connection),
-        vec![
-            "dolog_users_delete".to_owned(),
-            "dolog_users_insert".to_owned(),
-            "dolog_users_update".to_owned()
-        ]
+    let names = trigger_names(&connection);
+    assert_eq!(names.len(), 3);
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "delete"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "insert"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "update"))
     );
 
     std::fs::remove_file(db_path).expect("remove temp db");
@@ -1035,39 +1103,57 @@ fn generate_apply_skips_triggers_that_only_differ_by_sql_case() {
     let connection = Connection::open(&db_path).expect("create sqlite database");
     connection
         .execute_batch(
-            r#"CREATE TABLE users (
+            "CREATE TABLE users (
                 id INTEGER PRIMARY KEY,
                 email TEXT NOT NULL
-            );
-            CREATE TABLE _dolog_changes (
-                id INTEGER PRIMARY KEY,
-                table_name TEXT NOT NULL,
-                operation TEXT NOT NULL,
-                old_values TEXT,
-                new_values TEXT,
-                changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            create trigger "dolog_users_insert"
+            );",
+        )
+        .expect("create users table");
+    drop(connection);
+
+    Command::cargo_bin("dolog")
+        .expect("build dolog binary")
+        .args([
+            "trigger",
+            "generate",
+            db_path.to_str().expect("utf8 path"),
+            "--table",
+            "users",
+            "--apply",
+        ])
+        .assert()
+        .success();
+
+    let connection = Connection::open(&db_path).expect("open sqlite database");
+    let insert_trigger = trigger_name_for_operation(&connection, "users", "insert");
+    let update_trigger = trigger_name_for_operation(&connection, "users", "update");
+    let delete_trigger = trigger_name_for_operation(&connection, "users", "delete");
+    connection
+        .execute_batch(&format!(
+            r#"DROP TRIGGER "{insert_trigger}";
+            DROP TRIGGER "{update_trigger}";
+            DROP TRIGGER "{delete_trigger}";
+            create trigger "{insert_trigger}"
             after insert on "users"
             begin
                 insert into "_dolog_changes" (table_name, operation, old_values, new_values)
                 values ('users', 'INSERT', NULL, json_object('id', NEW."id", 'email', NEW."email"));
             end;
-            create trigger "dolog_users_update"
+            create trigger "{update_trigger}"
             after update on "users"
             begin
                 insert into "_dolog_changes" (table_name, operation, old_values, new_values)
                 values ('users', 'UPDATE', json_object('id', OLD."id", 'email', OLD."email"), json_object('id', NEW."id", 'email', NEW."email"));
             end;
-            create trigger "dolog_users_delete"
+            create trigger "{delete_trigger}"
             after delete on "users"
             begin
                 insert into "_dolog_changes" (table_name, operation, old_values, new_values)
                 values ('users', 'DELETE', json_object('id', OLD."id", 'email', OLD."email"), NULL);
-            end;"#,
-        )
+            end;"#
+        ))
         .expect("create lowercase triggers");
-    let insert_sql = trigger_sql(&connection, "dolog_users_insert");
+    let insert_sql = trigger_sql(&connection, &insert_trigger);
     drop(connection);
 
     Command::cargo_bin("dolog")
@@ -1087,7 +1173,7 @@ fn generate_apply_skips_triggers_that_only_differ_by_sql_case() {
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
-    assert_eq!(trigger_sql(&connection, "dolog_users_insert"), insert_sql);
+    assert_eq!(trigger_sql(&connection, &insert_trigger), insert_sql);
 
     std::fs::remove_file(db_path).expect("remove temp db");
 }
@@ -1584,6 +1670,19 @@ fn trigger_sql(connection: &Connection, trigger: &str) -> String {
             |row| row.get(0),
         )
         .expect("read trigger sql")
+}
+
+fn trigger_name_for_operation(connection: &Connection, table: &str, operation: &str) -> String {
+    trigger_names(connection)
+        .into_iter()
+        .find(|name| is_hashed_trigger_name(name, table, operation))
+        .expect("find trigger for operation")
+}
+
+fn is_hashed_trigger_name(name: &str, table: &str, operation: &str) -> bool {
+    let stem = format!("dolog_{table}_{operation}_");
+    name.strip_prefix(&stem)
+        .is_some_and(|hash| hash.len() == 16 && hash.chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
 fn table_exists(connection: &Connection, table: &str) -> bool {

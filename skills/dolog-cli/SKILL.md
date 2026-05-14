@@ -21,7 +21,7 @@ The normal flow is:
 Important defaults:
 
 - log table: `_dolog_changes`
-- trigger prefix: `dolog`
+- trigger prefix: `dolog` for names like `dolog_<table>_<operation>_<column-hash>`
 - export and dry-run batch size: `100` rows by default
 
 ## Command Map
@@ -65,6 +65,7 @@ See the [log export reference](references/log-export.md) for workflows, options,
 - Warn that normal `log export` deletes exported rows after writing them.
 - Avoid targeting the log table itself as a tracked table.
 - If the user omits `--operation`, `dolog` uses all three operations: `insert`, `update`, and `delete`.
+- Trigger names include a hash of ordered column names; unchanged tables are skipped and stale managed trigger hashes are removed on refresh.
 
 ## Useful Defaults and Options
 

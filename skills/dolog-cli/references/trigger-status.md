@@ -8,6 +8,7 @@ Show whether `dolog`-managed `INSERT`, `UPDATE`, and `DELETE` triggers exist for
 - Repeat `--table` to inspect multiple specific tables.
 - Use `--trigger-prefix` if managed trigger names use a prefix other than `dolog`.
 - Use `--log-table` if the log table name differs from `_dolog_changes`.
+- Status recognizes hashed trigger names like `dolog_users_insert_<column-hash>`.
 
 ## Examples
 

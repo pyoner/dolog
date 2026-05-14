@@ -18,6 +18,9 @@ Generate managed trigger SQL for one or more tables.
 - If `--operation` is omitted, `dolog` generates `insert`, `update`, and `delete` triggers.
 - `--apply` is only supported when the schema source is a real SQLite database file.
 - `--drop` switches generation into trigger-removal mode.
+- Managed trigger names include a hash of ordered column names: `dolog_<table>_<operation>_<column-hash>`.
+- If the current hash trigger already exists and SQL still matches, no trigger SQL is generated for that operation.
+- If columns change, `dolog` creates a new hash trigger name and removes stale managed names for that table and operation.
 
 ## Common Workflows
 
@@ -41,7 +44,7 @@ dolog trigger generate db.sqlite --table users --apply
 
 Use this after schema changes when the goal is to refresh installed managed triggers.
 
-When `--apply` is used, `dolog` only changes triggers that are missing or no longer match the current table definition.
+When `--apply` is used, `dolog` only changes triggers that are missing, stale, or no longer match the current table definition.
 
 ### Limit generation to selected operations
 

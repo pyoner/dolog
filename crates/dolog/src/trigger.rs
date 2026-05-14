@@ -1,6 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub fn open_connection(path: &Path) -> Result<Connection, AppError> {
@@ -96,49 +97,47 @@ impl TriggerManager {
         operations: &[Operation],
     ) -> Result<ExecutionPlan, AppError> {
         let target = self.describe_target(connection, table)?;
-        let mut statements = vec![self.create_log_table_sql()];
-        statements.extend(
-            operations
-                .iter()
-                .copied()
-                .map(|operation| self.drop_trigger_sql(&target.name, operation)),
-        );
-        statements.extend(
-            operations
-                .iter()
-                .copied()
-                .map(|operation| self.create_trigger_sql(&target, operation)),
-        );
-        Ok(ExecutionPlan::new(statements))
-    }
-
-    pub fn plan_apply_changed(
-        &self,
-        connection: &Connection,
-        table: &str,
-        operations: &[Operation],
-    ) -> Result<ExecutionPlan, AppError> {
-        let target = self.describe_target(connection, table)?;
-        let existing = self.existing_trigger_sql(connection, &target.name)?;
+        let existing = self.existing_triggers(connection, &target.name)?;
         let mut statements = Vec::new();
         let mut needs_log_table = false;
 
         for operation in operations.iter().copied() {
-            let trigger_name = self.trigger_name(&target.name, operation);
+            let desired_name = self.trigger_name(&target, operation);
             let desired_sql = self.create_trigger_sql(&target, operation);
+            let operation_triggers = existing
+                .iter()
+                .filter(|trigger| trigger.operation == operation)
+                .collect::<Vec<_>>();
+            let current = operation_triggers
+                .iter()
+                .copied()
+                .find(|trigger| trigger.name == desired_name);
+            let current_matches = current
+                .map(|trigger| sql_matches(&trigger.sql, &desired_sql))
+                .unwrap_or(false);
+            let stale_triggers = operation_triggers
+                .iter()
+                .copied()
+                .filter(|trigger| trigger.name != desired_name)
+                .collect::<Vec<_>>();
 
-            match existing.get(&trigger_name) {
-                Some(current_sql) if sql_matches(current_sql, &desired_sql) => {}
-                Some(_) => {
-                    needs_log_table = true;
-                    statements.push(self.drop_trigger_sql(&target.name, operation));
-                    statements.push(desired_sql);
-                }
-                None => {
-                    needs_log_table = true;
-                    statements.push(desired_sql);
-                }
+            if current_matches && stale_triggers.is_empty() {
+                continue;
             }
+
+            statements.extend(
+                stale_triggers
+                    .iter()
+                    .map(|trigger| self.drop_named_trigger_sql(&trigger.name)),
+            );
+
+            if current_matches {
+                continue;
+            }
+
+            needs_log_table = true;
+            statements.push(self.drop_named_trigger_sql(&desired_name));
+            statements.push(desired_sql);
         }
 
         if needs_log_table {
@@ -148,6 +147,15 @@ impl TriggerManager {
         Ok(ExecutionPlan::new(statements))
     }
 
+    pub fn plan_apply_changed(
+        &self,
+        connection: &Connection,
+        table: &str,
+        operations: &[Operation],
+    ) -> Result<ExecutionPlan, AppError> {
+        self.plan_update(connection, table, operations)
+    }
+
     pub fn plan_delete(
         &self,
         connection: &Connection,
@@ -155,13 +163,27 @@ impl TriggerManager {
         operations: &[Operation],
     ) -> Result<ExecutionPlan, AppError> {
         let target = self.describe_target(connection, table)?;
-        Ok(ExecutionPlan::new(
-            operations
+        let existing = self.existing_triggers(connection, &target.name)?;
+        let mut statements = Vec::new();
+
+        for operation in operations.iter().copied() {
+            let mut matched_existing = false;
+
+            for trigger in existing
                 .iter()
-                .copied()
-                .map(|operation| self.drop_trigger_sql(&target.name, operation))
-                .collect(),
-        ))
+                .filter(|trigger| trigger.operation == operation)
+            {
+                matched_existing = true;
+                statements.push(self.drop_named_trigger_sql(&trigger.name));
+            }
+
+            if !matched_existing {
+                let desired_name = self.trigger_name(&target, operation);
+                statements.push(self.drop_named_trigger_sql(&desired_name));
+            }
+        }
+
+        Ok(ExecutionPlan::new(statements))
     }
 
     pub fn list_triggers(
@@ -252,28 +274,46 @@ impl TriggerManager {
             return Err(AppError::NoColumns(name));
         }
 
-        Ok(TableDefinition { name, columns })
+        let column_hash = column_hash(&columns);
+
+        Ok(TableDefinition {
+            name,
+            columns,
+            column_hash,
+        })
     }
 
-    fn existing_trigger_sql(
+    fn existing_triggers(
         &self,
         connection: &Connection,
         table: &str,
-    ) -> Result<HashMap<String, String>, AppError> {
-        let like_pattern = format!("{}_{}_%", self.trigger_prefix, table);
+    ) -> Result<Vec<ExistingTrigger>, AppError> {
         let mut statement = connection.prepare(
             "SELECT name, sql
              FROM sqlite_master
-             WHERE type = 'trigger' AND tbl_name = ?1 AND name LIKE ?2",
+             WHERE type = 'trigger' AND tbl_name = ?1
+             ORDER BY name",
         )?;
 
-        let rows = statement.query_map([table, like_pattern.as_str()], |row| {
+        let rows = statement.query_map([table], |row| {
             let sql = row.get::<_, Option<String>>(1)?.unwrap_or_default();
             Ok((row.get::<_, String>(0)?, sql))
         })?;
 
-        rows.collect::<Result<HashMap<_, _>, _>>()
-            .map_err(AppError::from)
+        let mut triggers = Vec::new();
+        for row in rows {
+            let (name, sql) = row?;
+            if let Some(operation) = trigger_operation_from_name(&self.trigger_prefix, table, &name)
+            {
+                triggers.push(ExistingTrigger {
+                    name,
+                    sql,
+                    operation,
+                });
+            }
+        }
+
+        Ok(triggers)
     }
 
     fn create_log_table_sql(&self) -> String {
@@ -291,7 +331,7 @@ impl TriggerManager {
     }
 
     fn create_trigger_sql(&self, table: &TableDefinition, operation: Operation) -> String {
-        let trigger_name = self.trigger_name(&table.name, operation);
+        let trigger_name = self.trigger_name(table, operation);
         let trigger_name = quote_ident(&trigger_name);
         let table_name = quote_ident(&table.name);
         let log_table = quote_ident(&self.log_table);
@@ -329,12 +369,19 @@ impl TriggerManager {
         }
     }
 
-    fn drop_trigger_sql(&self, table: &str, operation: Operation) -> String {
-        let trigger_name = self.trigger_name(table, operation);
-        format!("DROP TRIGGER IF EXISTS {};", quote_ident(&trigger_name))
+    fn drop_named_trigger_sql(&self, trigger_name: &str) -> String {
+        format!("DROP TRIGGER IF EXISTS {};", quote_ident(trigger_name))
     }
 
-    fn trigger_name(&self, table: &str, operation: Operation) -> String {
+    fn trigger_name(&self, table: &TableDefinition, operation: Operation) -> String {
+        format!(
+            "{}_{}",
+            self.trigger_stem(&table.name, operation),
+            table.column_hash
+        )
+    }
+
+    fn trigger_stem(&self, table: &str, operation: Operation) -> String {
         format!(
             "{}_{}_{}",
             self.trigger_prefix,
@@ -398,6 +445,13 @@ impl Operation {
 struct TableDefinition {
     name: String,
     columns: Vec<String>,
+    column_hash: String,
+}
+
+struct ExistingTrigger {
+    name: String,
+    sql: String,
+    operation: Operation,
 }
 
 fn resolve_table_name(connection: &Connection, table: &str) -> Result<String, AppError> {
@@ -444,6 +498,49 @@ fn json_object_expr(alias: &str, columns: &[String]) -> String {
         .join(", ");
 
     format!("json_object({entries})")
+}
+
+fn column_hash(columns: &[String]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"dolog-columns-v1");
+
+    for column in columns {
+        hasher.update((column.len() as u64).to_le_bytes());
+        hasher.update(column.as_bytes());
+    }
+
+    let digest = hasher.finalize();
+    digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn trigger_operation_from_name(prefix: &str, table: &str, trigger_name: &str) -> Option<Operation> {
+    let stem = format!("{prefix}_{table}_").to_ascii_lowercase();
+    let trigger_name = trigger_name.to_ascii_lowercase();
+    let suffix = trigger_name.strip_prefix(&stem)?;
+
+    Operation::all()
+        .into_iter()
+        .find(|operation| trigger_suffix_matches_operation(suffix, *operation))
+}
+
+fn trigger_suffix_matches_operation(suffix: &str, operation: Operation) -> bool {
+    let operation_suffix = operation.as_suffix();
+
+    if suffix == operation_suffix {
+        return true;
+    }
+
+    suffix
+        .strip_prefix(operation_suffix)
+        .and_then(|suffix| suffix.strip_prefix('_'))
+        .is_some_and(is_hash_suffix)
+}
+
+fn is_hash_suffix(suffix: &str) -> bool {
+    suffix.len() == 16 && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn sql_matches(left: &str, right: &str) -> bool {
@@ -541,9 +638,7 @@ pub enum AppError {
         #[source]
         source: rusqlite::Error,
     },
-    #[error(
-        "--apply is only supported when the schema source path is a real SQLite database file"
-    )]
+    #[error("--apply is only supported when the schema source path is a real SQLite database file")]
     ApplyUnsupportedWithSchemaSource,
     #[error("an output file is required unless --dry-run is used")]
     MissingExportOutput,
@@ -561,7 +656,10 @@ pub enum AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{json_object_expr, normalize_sql, quote_ident, quote_string, sql_matches};
+    use super::{
+        Operation, column_hash, json_object_expr, normalize_sql, quote_ident, quote_string,
+        sql_matches, trigger_operation_from_name,
+    };
 
     #[test]
     fn quotes_identifiers() {
@@ -579,6 +677,32 @@ mod tests {
         assert_eq!(
             expr,
             "json_object('id', NEW.\"id\", 'email', NEW.\"email\")"
+        );
+    }
+
+    #[test]
+    fn hashes_column_names_deterministically() {
+        let hash = column_hash(&["id".to_owned(), "email".to_owned()]);
+
+        assert_eq!(hash.len(), 16);
+        assert_eq!(hash, column_hash(&["id".to_owned(), "email".to_owned()]));
+        assert_ne!(hash, column_hash(&["email".to_owned(), "id".to_owned()]));
+        assert_ne!(hash, column_hash(&["id".to_owned(), "name".to_owned()]));
+    }
+
+    #[test]
+    fn parses_legacy_and_hashed_trigger_names() {
+        assert_eq!(
+            trigger_operation_from_name("dolog", "users", "dolog_users_insert"),
+            Some(Operation::Insert)
+        );
+        assert_eq!(
+            trigger_operation_from_name("dolog", "users", "dolog_users_update_0123456789abcdef"),
+            Some(Operation::Update)
+        );
+        assert_eq!(
+            trigger_operation_from_name("dolog", "users", "dolog_users_insert_archive"),
+            None
         );
     }
 

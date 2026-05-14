@@ -9,7 +9,7 @@ use rusqlite::Connection;
 
 use crate::log_export::{build_export_query, export_logs, log_status, preview_logs};
 use crate::trigger::{
-    open_connection, AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager,
+    AppError, ExecutionPlan, ManagedTrigger, Operation, TriggerManager, open_connection,
 };
 
 const DEFAULT_LOG_EXPORT_LIMIT: usize = 100;
@@ -466,23 +466,33 @@ fn operation_from_trigger_name(prefix: &str, table: &str, trigger_name: &str) ->
     let trigger_name = trigger_name.to_ascii_lowercase();
     let suffix = trigger_name.strip_prefix(&stem)?;
 
-    match suffix {
-        "insert" => Some(Operation::Insert),
-        "update" => Some(Operation::Update),
-        "delete" => Some(Operation::Delete),
-        _ => None,
+    Operation::all()
+        .into_iter()
+        .find(|operation| trigger_suffix_matches_operation(suffix, *operation))
+}
+
+fn trigger_suffix_matches_operation(suffix: &str, operation: Operation) -> bool {
+    let operation_suffix = operation.as_suffix();
+
+    if suffix == operation_suffix {
+        return true;
     }
+
+    suffix
+        .strip_prefix(operation_suffix)
+        .and_then(|suffix| suffix.strip_prefix('_'))
+        .is_some_and(is_hash_suffix)
+}
+
+fn is_hash_suffix(suffix: &str) -> bool {
+    suffix.len() == 16 && suffix.chars().all(|ch| ch.is_ascii_hexdigit())
 }
 
 fn yes_no(value: bool) -> &'static str {
-    if value {
-        "yes"
-    } else {
-        "no"
-    }
+    if value { "yes" } else { "no" }
 }
 
-fn print_status_table(db: &PathBuf, rows: &[StatusRow]) {
+fn print_status_table(db: &Path, rows: &[StatusRow]) {
     let table_width = rows
         .iter()
         .map(|row| row.table.len())
@@ -522,7 +532,7 @@ fn print_statements(statements: &[String]) {
     }
 }
 
-fn write_plan(path: &PathBuf, plan: &ExecutionPlan) -> Result<(), AppError> {
+fn write_plan(path: &Path, plan: &ExecutionPlan) -> Result<(), AppError> {
     let contents = format!("{}\n", plan.statements().join("\n\n"));
     fs::write(path, contents).map_err(|source| AppError::WriteOutput {
         path: path.display().to_string(),
@@ -596,7 +606,7 @@ fn open_sql_file_connection(path: &Path) -> Result<Connection, AppError> {
     Ok(connection)
 }
 
-fn print_log_status_table(db: &PathBuf, rows: &[crate::log_export::LogStatusRow]) {
+fn print_log_status_table(db: &Path, rows: &[crate::log_export::LogStatusRow]) {
     let table_width = rows
         .iter()
         .map(|row| row.table_name.len())

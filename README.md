@@ -98,6 +98,8 @@ dolog trigger --help
 - `trigger status` is read-only.
 - By default, `dolog` captures `insert`, `update`, and `delete` operations.
 - The default log table is `_dolog_changes`.
+- Managed trigger names include a hash of ordered column names, for example `dolog_users_insert_<hash>`.
+- Re-running trigger generation against an unchanged table skips trigger creation; schema changes create new hash names and remove stale managed triggers.
 
 ## More Documentation
 

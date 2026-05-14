@@ -25,24 +25,33 @@ fn manages_trigger_lifecycle_for_a_table() {
         .expect("preview create");
     assert_eq!(preview_create.len(), 4);
     assert!(preview_create[0].contains("CREATE TABLE IF NOT EXISTS \"_dolog_changes\""));
-    assert!(preview_create[1].contains("CREATE TRIGGER \"dolog_users_insert\""));
+    assert!(preview_create[1].contains("CREATE TRIGGER \"dolog_users_insert_"));
 
     manager
         .create(&mut connection, "users")
         .expect("create triggers");
-    assert_eq!(
-        trigger_names(&connection),
-        vec![
-            "dolog_users_delete".to_owned(),
-            "dolog_users_insert".to_owned(),
-            "dolog_users_update".to_owned()
-        ]
+    let names = trigger_names(&connection);
+    assert_eq!(names.len(), 3);
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "delete"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "insert"))
+    );
+    assert!(
+        names
+            .iter()
+            .any(|name| is_hashed_trigger_name(name, "users", "update"))
     );
     let listed = manager
         .list_triggers(&connection, Some("users"))
         .expect("list triggers");
     assert_eq!(listed.len(), 3);
-    assert_eq!(listed[0].name, "dolog_users_delete");
+    assert!(is_hashed_trigger_name(&listed[0].name, "users", "delete"));
 
     connection
         .execute("ALTER TABLE users ADD COLUMN name TEXT", [])
@@ -51,9 +60,17 @@ fn manages_trigger_lifecycle_for_a_table() {
     let preview_update = manager
         .preview_update(&connection, "users")
         .expect("preview update");
-    assert_eq!(preview_update.len(), 7);
-    assert!(preview_update[1].contains("DROP TRIGGER IF EXISTS \"dolog_users_insert\";"));
-    assert!(preview_update[6].contains("CREATE TRIGGER \"dolog_users_delete\""));
+    assert_eq!(preview_update.len(), 10);
+    assert!(
+        preview_update
+            .iter()
+            .any(|sql| sql.contains("DROP TRIGGER IF EXISTS \"dolog_users_insert_"))
+    );
+    assert!(
+        preview_update
+            .iter()
+            .any(|sql| sql.contains("CREATE TRIGGER \"dolog_users_delete_"))
+    );
 
     manager
         .update(&mut connection, "users")
@@ -78,7 +95,7 @@ fn manages_trigger_lifecycle_for_a_table() {
         .preview_delete(&connection, "users")
         .expect("preview delete");
     assert_eq!(preview_delete.len(), 3);
-    assert!(preview_delete[0].contains("DROP TRIGGER IF EXISTS \"dolog_users_insert\";"));
+    assert!(preview_delete[0].contains("DROP TRIGGER IF EXISTS \"dolog_users_insert_"));
 
     manager
         .delete(&mut connection, "users")
@@ -147,6 +164,12 @@ fn trigger_names(connection: &Connection) -> Vec<String> {
         .expect("query triggers");
 
     rows.map(|row| row.expect("row")).collect()
+}
+
+fn is_hashed_trigger_name(name: &str, table: &str, operation: &str) -> bool {
+    let stem = format!("dolog_{table}_{operation}_");
+    name.strip_prefix(&stem)
+        .is_some_and(|hash| hash.len() == 16 && hash.chars().all(|ch| ch.is_ascii_hexdigit()))
 }
 
 fn table_exists(connection: &Connection, table: &str) -> bool {
