@@ -208,13 +208,7 @@ fn generate_prints_sql_to_stdout_without_modifying_database() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
-        ))
-        .stdout(predicate::str::contains(
             "CREATE TRIGGER \"dolog_users_insert_",
-        ))
-        .stdout(predicate::str::contains(
-            "DROP TRIGGER IF EXISTS \"dolog_users_insert_",
         ));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -294,7 +288,6 @@ fn generate_writes_sql_file_without_modifying_database() {
         .stdout(predicate::str::contains("Wrote trigger SQL to"));
 
     let sql = std::fs::read_to_string(&output_path).expect("read output file");
-    assert!(sql.contains("CREATE TABLE IF NOT EXISTS \"_dolog_changes\""));
     assert!(sql.contains("CREATE TRIGGER \"dolog_users_insert_"));
 
     let connection = Connection::open(&db_path).expect("open sqlite database");
@@ -328,9 +321,6 @@ fn generate_from_directory_prints_sql_to_stdout() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
-        ))
         .stdout(predicate::str::contains(
             "CREATE TRIGGER \"dolog_users_insert_",
         ));
@@ -466,9 +456,6 @@ fn generate_from_sql_file_prints_sql_to_stdout() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains(
-            "CREATE TABLE IF NOT EXISTS \"_dolog_changes\"",
-        ))
         .stdout(predicate::str::contains(
             "CREATE TRIGGER \"dolog_users_insert_",
         ));

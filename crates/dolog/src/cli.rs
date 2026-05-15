@@ -316,6 +316,7 @@ impl TriggerGenerateArgs {
                 return Ok(());
             }
 
+            manager.ensure_log_table(&connection)?;
             manager.apply_plan(&mut connection, &plan)?;
             println!("Applied trigger SQL for {}.", format_table_targets(&tables));
             return Ok(());

@@ -60,7 +60,7 @@ fn manages_trigger_lifecycle_for_a_table() {
     let preview_update = manager
         .preview_update(&connection, "users")
         .expect("preview update");
-    assert_eq!(preview_update.len(), 10);
+    assert_eq!(preview_update.len(), 6);
     assert!(
         preview_update
             .iter()
@@ -131,7 +131,7 @@ fn planning_and_dry_run_do_not_modify_real_sqlite_db() {
     let update_plan = manager
         .plan_update(&connection, "users", &dolog::trigger::Operation::all())
         .expect("plan update");
-    assert_eq!(update_plan.statements().len(), 7);
+    assert_eq!(update_plan.statements().len(), 3);
     assert!(trigger_names(&connection).is_empty());
     assert!(!table_exists(&connection, "_dolog_changes"));
 

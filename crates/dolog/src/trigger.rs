@@ -34,6 +34,7 @@ impl TriggerManager {
     }
 
     pub fn update(&self, connection: &mut Connection, table: &str) -> Result<(), AppError> {
+        self.ensure_log_table(connection)?;
         let plan = self.plan_update(connection, table, &Operation::all())?;
         self.apply_plan(connection, &plan)
     }
@@ -99,7 +100,6 @@ impl TriggerManager {
         let target = self.describe_target(connection, table)?;
         let existing = self.existing_triggers(connection, &target.name)?;
         let mut statements = Vec::new();
-        let mut needs_log_table = false;
 
         for operation in operations.iter().copied() {
             let desired_name = self.trigger_name(&target, operation);
@@ -135,13 +135,10 @@ impl TriggerManager {
                 continue;
             }
 
-            needs_log_table = true;
-            statements.push(self.drop_named_trigger_sql(&desired_name));
+            if current.is_some() {
+                statements.push(self.drop_named_trigger_sql(&desired_name));
+            }
             statements.push(desired_sql);
-        }
-
-        if needs_log_table {
-            statements.insert(0, self.create_log_table_sql());
         }
 
         Ok(ExecutionPlan::new(statements))
@@ -259,6 +256,12 @@ impl TriggerManager {
 
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn ensure_log_table(&self, connection: &Connection) -> Result<(), AppError> {
+        connection
+            .execute_batch(&self.create_log_table_sql())
+            .map_err(AppError::from)
     }
 
     fn describe_target(
